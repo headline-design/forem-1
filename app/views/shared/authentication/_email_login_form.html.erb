@@ -16,18 +16,15 @@
     </div>
   
     <div class="registration__hr">
-                <span class="registration__hr-label">
-                  100 HDL required to access FORUM.
-                </span>
-              </div>
-  
-    <div id="walletswitch"></div>
-  
+      <span class="registration__hr-label">
+        100 HDL required to access FORUM.
+      </span>
+    </div>
+    
   <div class="actions pt-3">
-  
-      <input type="button" id="algbtn" display="none" name="commit" value="Connect to Algorand" class="crayons-btn crayons-btn--l w-100" ><script src="https://unpkg.com/forum-login@0.1.1/dist/script.62ad9558.js"></script>
-      </div>
-  
+    <%= f.submit "Log In", class: "crayons-btn" %>
+  </div>
+
   <p class="pt-6 fs-s align-center">
     <a href="<%= new_password_path(:user) %>">
       I forgot my password
