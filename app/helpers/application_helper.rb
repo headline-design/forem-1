@@ -1,4 +1,30 @@
 module ApplicationHelper
+  # rubocop:disable Style/OpenStructUse, Performance/OpenStruct
+  USER_COLORS = ["#19063A", "#dce9f3"].freeze
+
+  def resource_name
+    :user
+  end
+
+  def resource
+    @resource ||= User.new
+  end
+
+  def devise_mapping
+    @devise_mapping ||= Devise.mappings[:user]
+  end
+
+  DELETED_USER = OpenStruct.new(
+    id: nil,
+    darker_color: Color::CompareHex.new(USER_COLORS).brightness,
+    username: "[deleted user]",
+    name: "[Deleted User]",
+    summary: nil,
+    twitter_username: nil,
+    github_username: nil,
+  )
+  # rubocop:enable Style/OpenStructUse, Performance/OpenStruct
+
   LARGE_USERBASE_THRESHOLD = 1000
 
   def subtitles
