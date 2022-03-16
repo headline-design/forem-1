@@ -79,7 +79,7 @@ GEM
       addressable (>= 2.3.2)
       nokogiri
       safely_block (>= 0.1.1)
-    ahoy_matey (4.0.2)
+    ahoy_matey (4.0.3)
       activesupport (>= 5.2)
       device_detector
       safely_block (>= 0.2.1)
@@ -196,7 +196,7 @@ GEM
       rake (> 10, < 14)
       ruby-statistics (>= 2.1)
       thor (>= 0.19, < 2)
-    device_detector (1.0.6)
+    device_detector (1.0.7)
     devise (4.8.1)
       bcrypt (~> 3.0)
       orm_adapter (~> 0.1)
@@ -234,7 +234,7 @@ GEM
       rainbow
       rubocop
       smart_properties
-    errbase (0.2.1)
+    errbase (0.2.2)
     erubi (1.10.0)
     et-orbi (1.2.4)
       tzinfo
@@ -379,7 +379,7 @@ GEM
     httpclient (2.8.3)
     hypershield (0.2.2)
       activerecord (>= 5)
-    i18n (1.8.11)
+    i18n (1.10.0)
       concurrent-ruby (~> 1.0)
     i18n-js (3.9.0)
       i18n (>= 0.6.6)
@@ -877,7 +877,7 @@ GEM
     xpath (3.2.0)
       nokogiri (~> 1.8)
     yard (0.9.26)
-    zeitwerk (2.5.3)
+    zeitwerk (2.5.4)
     zonebie (0.6.1)
 
 PLATFORMS
