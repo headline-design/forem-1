@@ -109,24 +109,6 @@ export const RuntimeBanner = () => {
   }
 
   return (
-    <div class="runtime-banner">
-      <a
-        href={targetURL}
-        class="flex items-center flex-1"
-        rel="noopener noreferrer"
-      >
-        <Icon src={LogoForem} native />
-        <div class="flex flex-col pl-3">
-          <span>Forem</span>
-          <span>Open with the Forem app</span>
-        </div>
-      </a>
-      <Button
-        onClick={dismissBanner}
-        class="runtime-banner__dismiss color-base-inverted"
-        icon={CloseIcon}
-        tooltip="Dismiss banner"
-      />
-    </div>
+    <div> </div>
   );
 };
