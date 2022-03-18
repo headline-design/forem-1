@@ -850,7 +850,7 @@ GEM
       public_suffix
     vault (0.16.0)
       aws-sigv4
-    vcr (6.0.0)
+    vcr (6.1.0)
     view_component (2.48.0)
       activesupport (>= 5.0.0, < 8.0)
       method_source (~> 1.0)
@@ -1040,7 +1040,7 @@ DEPENDENCIES
   uglifier (~> 4.2)
   validate_url (~> 1.0)
   vault (~> 0.16)
-  vcr (~> 6.0)
+  vcr (~> 6.1)
   view_component (~> 2.48)
   wcag_color_contrast (~> 0.1)
   web-console (~> 4.2)
