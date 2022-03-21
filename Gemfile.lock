@@ -536,7 +536,7 @@ GEM
       omniauth-oauth (~> 1.1)
       rack
     orm_adapter (0.5.0)
-    parallel (1.21.0)
+    parallel (1.22.0)
     parser (3.1.0.0)
       ast (~> 2.4.1)
     patron (0.13.3)
@@ -923,6 +923,7 @@ DEPENDENCIES
   factory_bot_rails (~> 6.2)
   faker (~> 2.19)
   fakeredis (~> 0.8.0)
+  faraday
   fastimage (~> 2.2)
   fastly (~> 3.0)
   feedjira (~> 3.2)
@@ -968,7 +969,7 @@ DEPENDENCIES
   omniauth-github (~> 2.0)
   omniauth-rails_csrf_protection (~> 1.0)
   omniauth-twitter (~> 1.4)
-  parallel (~> 1.21)
+  parallel (~> 1.22)
   patron (~> 0.13.3)
   pg (~> 1.2)
   pg_query (>= 0.9.0)
