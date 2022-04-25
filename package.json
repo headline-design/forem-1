@@ -61,7 +61,7 @@
     "@whitespace/storybook-addon-html": "^5.0.0",
     "babel-core": "^7.0.0-bridge.0",
     "babel-jest": "^27.4.5",
-    "babel-loader": "^8.2.3",
+    "babel-loader": "^8.2.5",
     "css-loader": "^5.2.7",
     "cssom": "^0.5.0",
     "cypress": "^8.7.0",
