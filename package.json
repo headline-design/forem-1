@@ -54,7 +54,7 @@
     "@testing-library/cypress": "^8.0.3",
     "@testing-library/dom": "^8.16.0",
     "@testing-library/jest-dom": "^5.16.4",
-    "@testing-library/preact": "^2.0.1",
+    "@testing-library/preact": "^3.2.2",
     "@testing-library/preact-hooks": "^1.1.0",
     "@testing-library/user-event": "^14.3.0",
     "@whitespace/storybook-addon-html": "^5.0.0",
