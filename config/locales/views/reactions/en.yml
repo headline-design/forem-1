@@ -10,14 +10,14 @@ en:
         thumbsup: Thumbs up
         thumbsdown: Thumbs down
         unicorn: Unicorn
-        vomit: Vomit
+        vomit: Flag
       summary:
         count_html:
           one: "%{count}%{start}\_reaction%{end}"
           other: "%{count}%{start}\_reactions%{end}"
         title: Reactions
       like:
-        title: Heart
+        title: Like
         aria_label: Like
         icon: Favorite heart button
         text: Like

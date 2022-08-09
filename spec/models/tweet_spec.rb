@@ -5,7 +5,6 @@ RSpec.describe Tweet, type: :model, vcr: true do
   let(:tweet_reply_id) { "1242938461784608770" }
   let(:retweet_id) { "1262395854469677058" }
 
-  it { is_expected.to validate_presence_of(:twitter_id_code) }
   it { is_expected.to validate_presence_of(:full_fetched_object_serialized) }
 
   describe ".find_or_fetch" do
@@ -88,6 +87,17 @@ RSpec.describe Tweet, type: :model, vcr: true do
 
         tweet = described_class.find_or_fetch(tweet_id)
         expect(tweet.user_id).to eq(user.id)
+      end
+
+      it "raises an error when Twitter key or secret are missing" do
+        allow(TwitterClient::Client)
+          .to receive(:status)
+          .and_raise(TwitterClient::Errors::BadRequest, "Bad Authentication data.")
+
+        expect do
+          described_class.find_or_fetch(tweet_id)
+        end.to raise_error(TwitterClient::Errors::BadRequest,
+                           "Authentication error; please contact your Forem admin about possible missing Twitter keys")
       end
     end
 

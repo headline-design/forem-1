@@ -5,8 +5,6 @@ RSpec.describe "/admin/customization/profile_fields", type: :request do
 
   before do
     sign_in admin
-    allow(FeatureFlag).to receive(:enabled?).and_call_original
-    allow(FeatureFlag).to receive(:enabled?).with(:profile_admin).and_return(true)
   end
 
   describe "GET /admin/customization/profile_fields" do
@@ -28,12 +26,14 @@ RSpec.describe "/admin/customization/profile_fields", type: :request do
   end
 
   describe "POST /admin/customization/profile_fields" do
+    let(:profile_field_group) { create(:profile_field_group) }
     let(:new_profile_field) do
       {
         label: "Test Location",
         input_type: "text_field",
         description: "users' location",
-        placeholder_text: "new york"
+        placeholder_text: "new york",
+        profile_field_group_id: profile_field_group.id
       }
     end
 

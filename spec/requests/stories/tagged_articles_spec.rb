@@ -13,6 +13,7 @@ RSpec.describe "Stories::TaggedArticlesIndex", type: :request do
         let(:tag) { create(:tag) }
         let(:org) { create(:organization) }
         let(:article) { create(:article, tags: tag.name, score: 5) }
+        let(:unsupported_tag) { create(:tag, supported: false) }
 
         before do
           stub_const("Stories::TaggedArticlesController::SIGNED_OUT_RECORD_COUNT", 10)
@@ -61,10 +62,33 @@ RSpec.describe "Stories::TaggedArticlesIndex", type: :request do
           end
         end
 
+        it "renders page when tag is not supported but has at least one approved article" do
+          create(:article, :past, published: true, approved: true, tags: unsupported_tag,
+                                  past_published_at: 5.years.ago)
+
+          get "/t/#{unsupported_tag.name}/top/week"
+
+          expect(response).to be_successful
+
+          get "/t/#{unsupported_tag.name}/top/month"
+          expect(response).to be_successful
+
+          get "/t/#{unsupported_tag.name}/top/year"
+          expect(response).to be_successful
+
+          get "/t/#{unsupported_tag.name}/top/infinity"
+          expect(response).to be_successful
+        end
+
         it "returns not found if no published posts and tag not supported" do
           Article.destroy_all
           tag.update_column(:supported, false)
           expect { get "/t/#{tag.name}" }.to raise_error(ActiveRecord::RecordNotFound)
+        end
+
+        it "renders not found if there are approved but scheduled posts" do
+          create(:article, published: true, approved: true, tags: unsupported_tag, published_at: 1.hour.from_now)
+          expect { get "/t/#{unsupported_tag.name}" }.to raise_error(ActiveRecord::RecordNotFound)
         end
 
         it "renders normal page if no articles but tag is supported" do
@@ -144,7 +168,7 @@ RSpec.describe "Stories::TaggedArticlesIndex", type: :request do
           end
 
           def sets_remember_token
-            expect(response.cookies["remember_user_token"]).not_to be nil
+            expect(response.cookies["remember_user_token"]).not_to be_nil
           end
 
           it "renders properly even if site config is private" do
@@ -157,6 +181,14 @@ RSpec.describe "Stories::TaggedArticlesIndex", type: :request do
             create_list(:article, 20, user: user, featured: true, tags: [tag.name], score: 20)
             get "/t/#{tag.name}"
             expect(response.body).not_to include('<span class="olderposts-pagenumber">')
+          end
+
+          it "includes a link to Relevant", :aggregate_failures do
+            get "/t/#{tag.name}/latest"
+
+            # The link should be `/t/tag2` (without a trailing slash) instead of `/t/tag2/`
+            expected_tag = "<a data-text=\"Relevant\" href=\"/t/#{tag.name}\""
+            expect(response.body).to include(expected_tag)
           end
         end
 
@@ -175,7 +207,7 @@ RSpec.describe "Stories::TaggedArticlesIndex", type: :request do
 
           def shows_sign_in_notice
             expect(response.body).not_to include("crayons-navigation__item crayons-navigation__item--current")
-            expect(response.body).to include("for the ability sort posts by")
+            expect(response.body).to include("for the ability to sort posts by")
           end
 
           def does_not_include_current_page_link(tag)
@@ -185,7 +217,7 @@ RSpec.describe "Stories::TaggedArticlesIndex", type: :request do
           end
 
           def does_not_set_remember_token
-            expect(response.cookies["remember_user_token"]).to be nil
+            expect(response.cookies["remember_user_token"]).to be_nil
           end
 
           def renders_pagination

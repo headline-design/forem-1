@@ -5,14 +5,23 @@ RSpec.describe DeviseMailer, type: :mailer do
 
   describe "#reset_password_instructions" do
     let(:email) { described_class.reset_password_instructions(user, "test") }
+    let(:from_email_address) { "custom_noreply@forem.com" }
+    let(:reply_to_email_address) { "custom_reply@forem.com" }
 
     before do
       allow(Settings::General).to receive(:app_domain).and_return("funky-one-of-a-kind-domain-#{rand(100)}.com")
+      allow(Settings::SMTP).to receive(:provided_minimum_settings?).and_return(true)
+      allow(Settings::SMTP).to receive(:from_email_address).and_return(from_email_address)
+      allow(Settings::SMTP).to receive(:reply_to_email_address).and_return(reply_to_email_address)
     end
 
     it "renders sender" do
-      expected_from = "#{Settings::Community.community_name} <#{ForemInstance.email}>"
+      expected_from = "#{Settings::Community.community_name} <#{from_email_address}>"
       expect(email["from"].value).to eq(expected_from)
+    end
+
+    it "renders a reply to email address" do
+      expect(email["reply_to"].value).to eq(reply_to_email_address)
     end
 
     it "renders proper URL" do
@@ -26,7 +35,7 @@ RSpec.describe DeviseMailer, type: :mailer do
       let(:email) { described_class.confirmation_instructions(creator, "faketoken") }
 
       it "renders the correct body" do
-        expect(email.body.to_s).to include("Hello! Once you've confirmed your email address, you'll be able to setup "\
+        expect(email.body.to_s).to include("Hello! Once you've confirmed your email address, you'll be able to setup " \
                                            "your Forem Instance.")
       end
 

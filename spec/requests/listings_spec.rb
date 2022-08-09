@@ -196,8 +196,7 @@ RSpec.describe "/listings", type: :request do
       it "does not subtract credits or create a listing if the listing is not valid" do
         expect do
           post "/listings", params: invalid_params
-        end.to change(Listing, :count).by(0)
-          .and change(user.credits.spent, :size).by(0)
+        end.to not_change(Listing, :count).and not_change(user.credits.spent, :size)
       end
     end
 
@@ -254,7 +253,7 @@ RSpec.describe "/listings", type: :request do
 
         post "/listings", params: listing_params
 
-        expect(Listing.last.organization_id).to be(nil)
+        expect(Listing.last.organization_id).to be_nil
         expect(Listing.last.user_id).to eq(user.id)
       end
 
@@ -314,28 +313,29 @@ RSpec.describe "/listings", type: :request do
       end
 
       it "creates listing draft and does not subtract credits" do
-        allow(Credits::Buyer).to receive(:call).and_raise(ActiveRecord::Rollback)
+        allow(Credits::Buy).to receive(:call).and_raise(ActiveRecord::Rollback)
         expect do
           post "/listings", params: draft_params
         end.to change(Listing, :count).by(1)
-          .and change(user.credits.spent, :size).by(0)
+          .and not_change(user.credits.spent, :size)
       end
 
       it "does not create a listing or subtract credits if the purchase does not go through" do
-        allow(Credits::Buyer).to receive(:call).and_raise(ActiveRecord::Rollback)
+        allow(Credits::Buy).to receive(:call).and_raise(ActiveRecord::Rollback)
         expect do
           post "/listings", params: listing_params
-        end.to change(Listing, :count).by(0)
-          .and change(user.credits.spent, :size).by(0)
+        end.to not_change(Listing, :count)
+          .and not_change(user.credits.spent, :size)
       end
     end
 
     context "when user is suspended" do
       it "raises error" do
         user.add_role(:suspended)
-        expect do
-          post "/listings", params: listing_params
-        end.to raise_error(SuspendedError)
+
+        post "/listings", params: listing_params
+
+        expect(response).to have_http_status :forbidden
       end
     end
 
@@ -388,15 +388,15 @@ RSpec.describe "/listings", type: :request do
       it "does not subtract spent credits if the user has not enough credits" do
         expect do
           put "/listings/#{listing.id}", params: params
-        end.to change(user.credits.spent, :size).by(0)
+        end.not_to change(user.credits.spent, :size)
       end
 
       it "does not bump the listing or subtract credits if the purchase does not go through" do
         previous_bumped_at = listing.bumped_at
-        allow(Credits::Buyer).to receive(:call).and_raise(ActiveRecord::Rollback)
+        allow(Credits::Buy).to receive(:call).and_raise(ActiveRecord::Rollback)
         expect do
           put "/listings/#{listing.id}", params: params
-        end.to change(user.credits.spent, :size).by(0)
+        end.not_to change(user.credits.spent, :size)
         expect(listing.reload.bumped_at.to_i).to eq(previous_bumped_at.to_i)
       end
 
@@ -447,14 +447,14 @@ RSpec.describe "/listings", type: :request do
         cost = listing_draft.cost
         create_list(:credit, cost, user: user)
         put "/listings/#{listing_draft.id}", params: params
-        expect(listing_draft.reload.published).to eq(true)
+        expect(listing_draft.reload.published).to be(true)
       end
 
       it "publishes a draft and ensures it has originally_published_at" do
         cost = listing_draft.cost
         create_list(:credit, cost, user: user)
         put "/listings/#{listing_draft.id}", params: params
-        expect(listing_draft.reload.originally_published_at).not_to eq(nil)
+        expect(listing_draft.reload.originally_published_at).not_to be_nil
       end
 
       it "publishes an org draft and charges org credits if first publish" do
@@ -469,31 +469,31 @@ RSpec.describe "/listings", type: :request do
         cost = org_listing_draft.cost
         create_list(:credit, cost, organization: organization)
         put "/listings/#{org_listing_draft.id}", params: params
-        expect(org_listing_draft.reload.published).to eq(true)
+        expect(org_listing_draft.reload.published).to be(true)
       end
 
       it "publishes a draft that was charged and is within 30 days of bump doesn't charge credits" do
         listing.update_column(:published, false)
         expect do
           put "/listings/#{listing.id}", params: params
-        end.to change(user.credits.spent, :size).by(0)
+        end.not_to change(user.credits.spent, :size)
       end
 
       it "publishes a draft that was charged and is within 30 days of bump and successfully sets published as true" do
         listing.update_column(:published, false)
         put "/listings/#{listing.id}", params: params
-        expect(listing.reload.published).to eq(true)
+        expect(listing.reload.published).to be(true)
       end
 
       it "fails to publish draft and doesn't charge credits" do
         expect do
           put "/listings/#{listing_draft.id}", params: params
-        end.to change(user.credits.spent, :size).by(0)
+        end.not_to change(user.credits.spent, :size)
       end
 
       it "fails to publish draft and published remains false" do
         put "/listings/#{listing_draft.id}", params: params
-        expect(listing_draft.reload.published).to eq(false)
+        expect(listing_draft.reload.published).to be(false)
       end
     end
 

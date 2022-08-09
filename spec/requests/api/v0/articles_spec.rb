@@ -397,7 +397,7 @@ RSpec.describe "Api::V0::Articles", type: :request do
   describe "GET /api/articles/:username/:slug" do
     it "returns CORS headers" do
       origin = "http://example.com"
-      get slug_api_articles_path(article.username, article.slug), headers: { origin: origin }
+      get "/api/articles/#{article.username}/#{article.slug}", headers: { origin: origin }
       expect(response).to have_http_status(:ok)
       expect(response.headers["Access-Control-Allow-Origin"]).to eq(origin)
       expect(response.headers["Access-Control-Allow-Methods"]).to eq("HEAD, GET, OPTIONS")
@@ -406,13 +406,13 @@ RSpec.describe "Api::V0::Articles", type: :request do
     end
 
     it "returns correct tags" do
-      get slug_api_articles_path(username: article.username, slug: article.slug)
+      get "/api/articles/#{article.username}/#{article.slug}"
       expect(response.parsed_body["tags"]).to eq(article.tag_list)
       expect(response.parsed_body["tag_list"]).to eq(article.tags[0].name)
     end
 
     it "returns proper article" do
-      get slug_api_articles_path(username: article.username, slug: article.slug)
+      get "/api/articles/#{article.username}/#{article.slug}"
       expect(response.parsed_body).to include(
         "title" => article.title,
         "body_markdown" => article.body_markdown,
@@ -424,7 +424,7 @@ RSpec.describe "Api::V0::Articles", type: :request do
       article.update_columns(
         edited_at: 1.minute.from_now, crossposted_at: 2.minutes.ago, last_comment_at: 30.seconds.ago,
       )
-      get slug_api_articles_path(username: article.username, slug: article.slug)
+      get "/api/articles/#{article.username}/#{article.slug}"
       expect(response.parsed_body).to include(
         "created_at" => article.created_at.utc.iso8601,
         "edited_at" => article.edited_at.utc.iso8601,
@@ -436,17 +436,17 @@ RSpec.describe "Api::V0::Articles", type: :request do
 
     it "fails with an unpublished article" do
       article.update_columns(published: false, published_at: nil)
-      get slug_api_articles_path(username: article.username, slug: article.slug)
+      get "/api/articles/#{article.username}/#{article.slug}"
       expect(response).to have_http_status(:not_found)
     end
 
     it "fails with an unknown article path" do
-      get slug_api_articles_path(username: "chris evan", slug: article.slug)
+      get "/api/articles/chrisevans/#{article.slug}"
       expect(response).to have_http_status(:not_found)
     end
 
     it "sets the correct edge caching surrogate key" do
-      get slug_api_articles_path(username: article.username, slug: article.slug)
+      get "/api/articles/#{article.username}/#{article.slug}"
 
       expected_key = [article.record_key].to_set
       expect(response.headers["surrogate-key"].split.to_set).to eq(expected_key)
@@ -461,7 +461,7 @@ RSpec.describe "Api::V0::Articles", type: :request do
       let(:user) { create(:user) }
 
       it "return unauthorized" do
-        get me_api_articles_path
+        get "/api/articles/me"
         expect(response).to have_http_status(:unauthorized)
       end
     end
@@ -470,13 +470,13 @@ RSpec.describe "Api::V0::Articles", type: :request do
       let(:user) { create(:user) }
 
       it "returns proper response specification" do
-        get me_api_articles_path, headers: headers
+        get "/api/articles/me", headers: headers
         expect(response.media_type).to eq("application/json")
         expect(response).to have_http_status(:ok)
       end
 
       it "returns success when requesting published articles with public token" do
-        get me_api_articles_path(status: :published), headers: headers
+        get "/api/articles/me/published", headers: headers
         expect(response.media_type).to eq("application/json")
         expect(response).to have_http_status(:ok)
       end
@@ -484,14 +484,14 @@ RSpec.describe "Api::V0::Articles", type: :request do
       it "return only user's articles including markdown" do
         create(:article, user: user)
         create(:article)
-        get me_api_articles_path, headers: headers
+        get "/api/articles/me", headers: headers
         expect(response.parsed_body.length).to eq(1)
         expect(response.parsed_body[0]["body_markdown"]).not_to be_nil
       end
 
       it "supports pagination" do
         create_list(:article, 3, user: user)
-        get me_api_articles_path, headers: headers, params: { page: 2, per_page: 2 }
+        get "/api/articles/me", headers: headers, params: { page: 2, per_page: 2 }
         expect(response.parsed_body.length).to eq(1)
       end
 
@@ -499,7 +499,7 @@ RSpec.describe "Api::V0::Articles", type: :request do
         article = create(:article, user: user)
         article.update_columns(organization_id: organization.id)
 
-        get me_api_articles_path, headers: headers
+        get "/api/articles/me", headers: headers
 
         keys = %w[
           type_of id title description published published_at slug path url
@@ -513,19 +513,19 @@ RSpec.describe "Api::V0::Articles", type: :request do
 
       it "only includes published articles by default" do
         create(:article, published: false, published_at: nil, user: user)
-        get me_api_articles_path, headers: headers
+        get "/api/articles/me", headers: headers
         expect(response.parsed_body.length).to eq(0)
       end
 
       it "only includes published articles when asking for published articles" do
         create(:article, published: false, published_at: nil, user: user)
-        get me_api_articles_path(status: :published), headers: headers
+        get "/api/articles/me/published", headers: headers
         expect(response.parsed_body.length).to eq(0)
       end
 
       it "only includes unpublished articles when asking for unpublished articles" do
         create(:article, published: false, published_at: nil, user: user)
-        get me_api_articles_path(status: :unpublished), headers: headers
+        get "/api/articles/me/unpublished", headers: headers
         expect(response.parsed_body.length).to eq(1)
       end
 
@@ -535,7 +535,7 @@ RSpec.describe "Api::V0::Articles", type: :request do
         Timecop.travel(1.day.from_now) do
           newer = create(:article, published: false, published_at: nil, user: user)
         end
-        get me_api_articles_path(status: :unpublished), headers: headers
+        get "/api/articles/me/unpublished", headers: headers
         expected_order = response.parsed_body.map { |resp| resp["id"] }
         expect(expected_order).to eq([newer.id, older.id])
       end
@@ -543,7 +543,7 @@ RSpec.describe "Api::V0::Articles", type: :request do
       it "puts unpublished articles at the top when asking for all articles" do
         create(:article, user: user)
         create(:article, published: false, published_at: nil, user: user)
-        get me_api_articles_path(status: :all), headers: headers
+        get "/api/articles/me/all", headers: headers
         expected_order = response.parsed_body.map { |resp| resp["published"] }
         expect(expected_order).to eq([false, true])
       end
@@ -551,39 +551,59 @@ RSpec.describe "Api::V0::Articles", type: :request do
       it "correctly returns reading time in minutes" do
         create(:article, user: user)
 
-        get me_api_articles_path, headers: headers
+        get "/api/articles/me", headers: headers
         expect(response.parsed_body.first["reading_time_minutes"]).to eq(article.reading_time)
       end
     end
   end
 
   describe "POST /api/articles" do
+    # As written, it's envisioned that the subject and these "let" statements create a valid
+    # authentication and authorization.
+    subject(:the_response) do
+      # This looks a bit funny, I want to issue the request but test the response.  The "post"
+      # method does not return a "response" object.
+      post api_articles_path, params: { article: params }.to_json, headers: headers
+      response
+    end
+
     let(:api_secret) { create(:api_secret) }
     let(:user) { api_secret.user }
+    let(:headers) { { "api-key" => api_secret.secret, "content-type" => "application/json" } }
+    let(:params) { {} }
 
-    context "when unauthorized" do
-      it "fails with no api key" do
-        post api_articles_path, headers: { "content-type" => "application/json" }
-        expect(response).to have_http_status(:unauthorized)
-      end
+    context "when user suspended" do
+      before { user.add_role(:suspended) }
 
-      it "fails with a suspended user" do
-        user.add_role(:suspended)
-        post api_articles_path, headers: { "api-key" => api_secret.secret, "content-type" => "application/json" }
-        expect(response).to have_http_status(:unauthorized)
-      end
+      it { is_expected.to have_http_status(:unauthorized) }
+    end
 
-      it "fails with the wrong api key" do
-        post api_articles_path, headers: { "api-key" => "foobar", "content-type" => "application/json" }
-        expect(response).to have_http_status(:unauthorized)
-      end
+    context "when no api key provided" do
+      let(:headers) { { "content-type" => "application/json" } }
 
-      it "fails with a failing secure compare" do
-        allow(ActiveSupport::SecurityUtils)
-          .to receive(:secure_compare).and_return(false)
-        post api_articles_path, headers: { "api-key" => api_secret.secret, "content-type" => "application/json" }
-        expect(response).to have_http_status(:unauthorized)
-      end
+      it { is_expected.to have_http_status(:unauthorized) }
+    end
+
+    context "when given invalid api key" do
+      let(:headers) { { "api-key" => "no you're never gonna get it", "content-type" => "application/json" } }
+
+      it { is_expected.to have_http_status(:unauthorized) }
+    end
+
+    context "when security comparision fails" do
+      before { allow(ActiveSupport::SecurityUtils).to receive(:secure_compare).and_return(false) }
+
+      it { is_expected.to have_http_status(:unauthorized) }
+    end
+
+    context "when only admins can post to site" do
+      # [@jeremyf] Part of me loaths the idea of writing this specific policy implementation.
+      #            Another option is to do some "allow_any_instance_of" antics.  For now, this is
+      #            the concession, but as we move through further policy changes, I'm uncertain if
+      #            we want our requests to bombard the nuances of policy.
+      before { allow(ArticlePolicy).to receive(:limit_post_creation_to_admins?).and_return(true) }
+
+      it { is_expected.to have_http_status(:unauthorized) }
     end
 
     describe "when authorized" do
@@ -954,7 +974,7 @@ RSpec.describe "Api::V0::Articles", type: :request do
           body_markdown: body_markdown,
         )
         expect(response).to have_http_status(:ok)
-        expect(article.reload.main_image).to eq(nil)
+        expect(article.reload.main_image).to be_nil
       end
 
       it "updates the main_image to be empty if given a different cover_image" do
@@ -990,7 +1010,7 @@ RSpec.describe "Api::V0::Articles", type: :request do
           )
         end.to change(Collection, :count).by(1)
         expect(response).to have_http_status(:ok)
-        expect(article.reload.collection).not_to be(nil)
+        expect(article.reload.collection).not_to be_nil
       end
 
       it "assigns the article to an existing series belonging to the user" do
@@ -1001,7 +1021,7 @@ RSpec.describe "Api::V0::Articles", type: :request do
             body_markdown: "Yo ho ho",
             series: collection.slug,
           )
-        end.to change(Collection, :count).by(0)
+        end.not_to change(Collection, :count)
         expect(response).to have_http_status(:ok)
         expect(article.reload.collection).to eq(collection)
       end
@@ -1055,27 +1075,6 @@ RSpec.describe "Api::V0::Articles", type: :request do
         expect(article.reload.published).to be(true)
       end
 
-      it "sends a notification when the article gets published" do
-        expect(article.published).to be(false)
-        allow(Notification).to receive(:send_to_followers)
-        put_article(body_markdown: "Yo ho ho", published: true)
-        expect(response).to have_http_status(:ok)
-        expect(Notification).to have_received(:send_to_followers).with(article, "Published").once
-      end
-
-      it "only sends a notification the first time the article gets published" do
-        expect(article.published).to be(false)
-        allow(Notification).to receive(:send_to_followers)
-        put_article(body_markdown: "Yo ho ho", published: true)
-        expect(response).to have_http_status(:ok)
-
-        article.update_columns(published: false)
-        put_article(published: true)
-        expect(response).to have_http_status(:ok)
-
-        expect(Notification).to have_received(:send_to_followers).with(article, "Published").once
-      end
-
       it "does not update the editing time when updated before publication" do
         article.update_columns(edited_at: nil)
         expect(article.published).to be(false)
@@ -1088,7 +1087,7 @@ RSpec.describe "Api::V0::Articles", type: :request do
       end
 
       it "updates the editing time when updated after publication" do
-        article.update_columns(published: true)
+        article.update_columns(published: true, published_at: Time.current)
         put_article(
           title: Faker::Book.title,
           body_markdown: "Yo ho ho",
@@ -1121,7 +1120,7 @@ RSpec.describe "Api::V0::Articles", type: :request do
 
       it "updates the editing time when updated after publication if the owner is an admin" do
         user.add_role(:super_admin)
-        article.update_columns(edited_at: nil, published: true)
+        article.update_columns(edited_at: nil, published: true, published_at: Time.current)
         put_article(
           title: Faker::Book.title,
           body_markdown: "Yo ho ho",

@@ -325,6 +325,30 @@ Cypress.Commands.add(
 );
 
 /**
+ * Creates a comment.
+ *
+ * @param {string} content The content of the comment.
+ * @param {number} commentableId The ID of either Article or PodcastEpisode.
+ * @param {string} commentableType The model that the comment belongs to.
+ * @param {number} [parentId=null] The ID of the parent comment if it exists.
+ *
+ * @returns {Cypress.Chainable<Cypress.Response>} A cypress request for creating a comment.
+ */
+Cypress.Commands.add(
+  'createComment',
+  ({ content, commentableId, commentableType, parentId = null }) => {
+    return cy.request('POST', '/comments', {
+      comment: {
+        body_markdown: content,
+        commentable_id: commentableId,
+        commentable_type: commentableType,
+        parent_id: parentId,
+      },
+    });
+  },
+);
+
+/**
  * Creates a response template.
  *
  * @param {string} title The title of a response template.
@@ -340,5 +364,62 @@ Cypress.Commands.add('createResponseTemplate', ({ title, content }) => {
     'POST',
     '/response_templates',
     `utf8=%E2%9C%93&response_template%5Btitle%5D=${encodedTitle}&response_template%5Bcontent%5D=${encodedContent}`,
+  );
+});
+
+/**
+ * Enables a feature flag.
+ *
+ * @param {string} flag The name of the feature flag to enable.
+ *
+ * @returns {Cypress.Chainable<Cypress.Response>} A cypress request for enabling a feature flag.
+ */
+Cypress.Commands.add('enableFeatureFlag', (flag) => {
+  return cy.request('POST', '/api/feature_flags', { flag });
+});
+
+/**
+ * Disables a feature flag.
+ *
+ * @param {string} flag The name of the feature flag to disable.
+ *
+ * @returns {Cypress.Chainable<Cypress.Response>} A cypress request for disabling a feature flag.
+ */
+Cypress.Commands.add('disableFeatureFlag', (flag) => {
+  return cy.request('DELETE', `/api/feature_flags?flag=${flag}`);
+});
+
+/**
+ * Retrieves the modal in a Forem instance.
+ *
+ * @returns {Cypress.Chainable<HTMLElement>} A reference to a modal dialog.
+ */
+Cypress.Commands.add('getModal', () => {
+  return cy.findByRole('dialog', { name: 'modal' });
+});
+
+/**
+ * The underlying library we use for the ColorPicker can often skip characters when using the `type()` command.
+ * This is due to the validation and state management under the hood, and the speed of input entry when using `type()`.
+ *
+ * This helper command instead uses `invoke` to make sure the entire color is entered correctly without flake.
+ *
+ * @param {string} color The color to enter
+ *
+ * @returns {Cypress.Chainable<HTMLElement>} A reference to the color input.
+ */
+Cypress.Commands.add(
+  'enterIntoColorInput',
+  { prevSubject: true },
+  (subject, color) => {
+    return cy.wrap(subject).invoke('val', color).trigger('input');
+  },
+);
+
+Cypress.Commands.add('inviteUser', ({ name, email }) => {
+  return cy.request(
+    'POST',
+    '/admin/member_manager/invitations',
+    `utf8=%E2%9C%93&user%5Bemail%5D=${email}&user%5Bname%5D=${name}&commit=Invite+User`,
   );
 });

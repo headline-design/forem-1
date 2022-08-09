@@ -64,7 +64,7 @@ RSpec.describe "UserSettings", type: :request do
       it "displays content on Account tab properly" do
         get user_settings_path(:account)
 
-        expect(response.body).to include("Set new password", "Account emails", "API Keys", "Danger Zone")
+        expect(response.body).to include("Set new password", "Account emails", "Danger Zone")
       end
 
       it "displays content on Billing tab properly" do
@@ -83,7 +83,7 @@ RSpec.describe "UserSettings", type: :request do
         get user_settings_path(:extensions)
 
         feed_section = "Publishing to #{Settings::Community.community_name} from RSS"
-        titles = ["Comment templates", feed_section, "Web monetization"]
+        titles = ["Comment templates", feed_section, "Web monetization", "API Keys"]
         expect(response.body).to include(*titles)
       end
 
@@ -359,7 +359,7 @@ RSpec.describe "UserSettings", type: :request do
       it "empties their associated username" do
         delete users_remove_identity_path, params: { provider: provider }
 
-        expect(user.public_send("#{provider}_username")).to be(nil)
+        expect(user.public_send("#{provider}_username")).to be_nil
       end
 
       it "updates the profile_updated_at timestamp" do
@@ -388,7 +388,7 @@ RSpec.describe "UserSettings", type: :request do
         expect(response).to redirect_to("/settings/account")
 
         error =
-          "An error occurred. Please try again or send an email to: #{ForemInstance.email}"
+          "An error occurred. Please try again or send an email to: #{ForemInstance.contact_email}"
         expect(flash[:error]).to eq(error)
       end
 
@@ -431,7 +431,7 @@ RSpec.describe "UserSettings", type: :request do
         delete users_remove_identity_path, params: { provider: provider }
 
         error =
-          "An error occurred. Please try again or send an email to: #{ForemInstance.email}"
+          "An error occurred. Please try again or send an email to: #{ForemInstance.contact_email}"
         expect(flash[:error]).to eq(error)
       end
 

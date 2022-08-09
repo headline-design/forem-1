@@ -2,24 +2,22 @@ require "rails_helper"
 
 RSpec.describe "Editor", type: :request do
   describe "GET /new" do
-    context "when not logged-in" do
-      it "asks the non logged in user to sign in" do
-        get new_path
+    subject(:request_call) { get new_path }
 
-        expect(response).to have_http_status(:ok)
-      end
+    let(:user) { create(:user) }
+
+    context "when not authenticated" do
+      it { is_expected.to eq(200) }
     end
 
-    context "when email login is allowed in /admin/customization/config" do
-      before do
-        allow(Settings::Authentication).to receive(:allow_email_password_login).and_return(true)
-      end
+    context "when authenticated and authorized" do
+      before { login_as user }
 
-      it "asks the non logged in user to sign in, with email signin enabled" do
+      it "is a successful response" do
+        # We have lots of Cypress tests of the behavior of the `/new` page.  Let's make sure we're
+        # verifying AuthN/AuthZ things.
         get new_path
-
-        expect(response.body).to include("Email")
-        expect(response.body).to include("Password")
+        expect(response).to have_http_status(:ok)
       end
     end
   end
@@ -30,8 +28,8 @@ RSpec.describe "Editor", type: :request do
 
     context "when not logged-in" do
       it "redirects to /enter" do
-        get "/username/article/edit"
-        expect(response).to redirect_to("/enter")
+        get "/#{user.username}/#{article.slug}/edit"
+        expect(response).to redirect_to(sign_up_path)
       end
     end
 
@@ -61,6 +59,25 @@ RSpec.describe "Editor", type: :request do
         sign_in user
         post "/articles/preview", headers: headers
         expect(response.media_type).to eq("application/json")
+      end
+    end
+
+    context "with front matter" do
+      it "returns successfully" do
+        sign_in user
+        article_body = <<~MARKDOWN
+          ---
+          ---
+
+          Hello
+        MARKDOWN
+
+        post "/articles/preview",
+             headers: headers,
+             params: { article_body: article_body },
+             as: :json
+
+        expect(response).to be_successful
       end
     end
   end

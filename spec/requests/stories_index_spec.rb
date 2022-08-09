@@ -20,10 +20,16 @@ RSpec.describe "StoriesIndex", type: :request do
 
       get "/"
       expect(response.body).to include(CGI.escapeHTML(article.title))
-      renders_ga_tracking_data
+      renders_ga_tracking_fields
       renders_proper_description
       renders_min_read_time
       renders_proper_sidebar(navigation_link)
+    end
+
+    it "doesn't render a featured scheduled article" do
+      article = create(:article, featured: true, published_at: 1.hour.from_now)
+      get "/"
+      expect(response.body).not_to include(CGI.escapeHTML(article.title))
     end
 
     def renders_proper_description
@@ -38,8 +44,9 @@ RSpec.describe "StoriesIndex", type: :request do
       expect(response.body).to include(CGI.escapeHTML(navigation_link.name))
     end
 
-    def renders_ga_tracking_data
+    def renders_ga_tracking_fields
       expect(response.body).to include("data-ga-tracking=\"#{Settings::General.ga_tracking_id}\"")
+      expect(response.body).to include("data-ga4-tracking-id=\"#{Settings::General.ga_analytics_4_id}\"")
     end
 
     it "renders registration page if the Forem instance is private" do
@@ -133,9 +140,9 @@ RSpec.describe "StoriesIndex", type: :request do
       get "/"
       expect(response.status).to eq(200)
 
-      expect(response.headers["X-Accel-Expires"]).to eq(nil)
+      expect(response.headers["X-Accel-Expires"]).to be_nil
       expect(response.headers["Cache-Control"]).not_to eq("public, no-cache")
-      expect(response.headers["Surrogate-Key"]).to eq(nil)
+      expect(response.headers["Surrogate-Key"]).to be_nil
     end
 
     it "sets correct cache headers", :aggregate_failures do
@@ -174,7 +181,7 @@ RSpec.describe "StoriesIndex", type: :request do
 
       allow(Settings::UserExperience).to receive(:feed_style).and_return("basic")
       get "/"
-      expect(response.body.scan(/(?=class="crayons-story__cover crayons-story__cover__image)/).count).to be 1
+      expect(response.body.scan(/(?=class="crayons-article__cover crayons-article__cover__image__feed)/).count).to be 1
     end
 
     it "shows multiple cover images if rich feed style" do
@@ -182,7 +189,9 @@ RSpec.describe "StoriesIndex", type: :request do
 
       allow(Settings::UserExperience).to receive(:feed_style).and_return("rich")
       get "/"
-      expect(response.body.scan(/(?=class="crayons-story__cover crayons-story__cover__image)/).count).to be > 1
+      # rubocop:disable Layout/LineLength
+      expect(response.body.scan(/(?=class="crayons-article__cover crayons-article__cover__image__feed)/).count).to be > 1
+      # rubocop:enable Layout/LineLength
     end
 
     context "with campaign hero" do
@@ -231,13 +240,25 @@ RSpec.describe "StoriesIndex", type: :request do
         create(:article, approved: false, body_markdown: u_body, score: 1)
       end
 
-      xit "doesn't display posts with the campaign tags when sidebar is disabled" do
+      it "displays display name when it is set" do
+        allow(Settings::Campaign).to receive(:display_name).and_return("Backstreet is back")
+        get "/"
+        expect(response.body).not_to include("Backstreet is back (0)")
+      end
+
+      it "displays Stories fallback when display name is not set" do
+        allow(Settings::Campaign).to receive(:display_name).and_return("")
+        get "/"
+        expect(response.body).not_to include("Stories (0)")
+      end
+
+      it "doesn't display posts with the campaign tags when sidebar is disabled" do
         allow(Settings::Campaign).to receive(:sidebar_enabled).and_return(false)
         get "/"
         expect(response.body).not_to include(CGI.escapeHTML("Super-sheep"))
       end
 
-      xit "doesn't display unapproved posts" do
+      it "doesn't display unapproved posts" do
         allow(Settings::Campaign).to receive(:sidebar_enabled).and_return(true)
         allow(Settings::Campaign).to receive(:sidebar_image).and_return("https://example.com/image.png")
         allow(Settings::Campaign).to receive(:articles_require_approval).and_return(true)
@@ -288,6 +309,28 @@ RSpec.describe "StoriesIndex", type: :request do
 
       it "has proper locale content on page" do
         expect(response.body).to include("Recherche")
+      end
+    end
+  end
+
+  describe "GET stories index with timeframe" do
+    describe "/latest" do
+      it "includes a link to Relevant", :aggregate_failures do
+        get "/latest"
+
+        # The link should be `/`
+        expected_tag = "<a data-text=\"Relevant\" href=\"/\""
+        expect(response.body).to include(expected_tag)
+      end
+    end
+
+    describe "/top/week" do
+      it "includes a link to Relevant", :aggregate_failures do
+        get "/top/week"
+
+        # The link should be `/`
+        expected_tag = "<a data-text=\"Relevant\" href=\"/\""
+        expect(response.body).to include(expected_tag)
       end
     end
   end

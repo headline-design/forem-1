@@ -6,11 +6,11 @@ RSpec.describe Articles::Feeds::Basic, type: :service do
   let(:unique_tag_name) { "foo" }
   let!(:article) { create(:article, hotness_score: 10) }
   let!(:hot_story) do
-    create(:article, hotness_score: 1000, score: 1000, published_at: 3.hours.ago, user_id: second_user.id)
+    create(:article, :past, hotness_score: 1000, score: 1000, past_published_at: 3.hours.ago, user_id: second_user.id)
   end
-  let!(:old_story) { create(:article, hotness_score: 500, published_at: 3.days.ago, tags: unique_tag_name) }
+  let!(:old_story) { create(:article, :past, hotness_score: 500, past_published_at: 3.days.ago, tags: unique_tag_name) }
   let!(:low_scoring_article) { create(:article, score: -1000) }
-  let!(:month_old_story) { create(:article, published_at: 1.month.ago) } # rubocop:disable RSpec/LetSetup
+  let!(:month_old_story) { create(:article, :past, past_published_at: 1.month.ago) } # rubocop:disable RSpec/LetSetup
 
   context "without a user" do
     let(:feed) { described_class.new(user: nil, number_of_articles: 100, page: 1) }
@@ -30,7 +30,6 @@ RSpec.describe Articles::Feeds::Basic, type: :service do
     it "returns articles with score above 0 sorted by user preference scores" do
       user.follow(old_story.user)
       old_story_tag = Tag.find_by(name: unique_tag_name)
-      old_story_tag.update(points: 10)
       user.follow(old_story_tag)
 
       result = feed.feed
@@ -44,16 +43,6 @@ RSpec.describe Articles::Feeds::Basic, type: :service do
       create(:user_block, blocker: user, blocked: second_user, config: "default")
       result = feed.feed
       expect(result).not_to include(hot_story)
-    end
-
-    it "doesn't display blocked articles", type: :system, js: true do
-      selector = "article[data-content-user-id='#{hot_story.user_id}']"
-      sign_in user
-      visit root_path
-      expect(page).to have_selector(selector, visible: :visible)
-      create(:user_block, blocker: user, blocked: hot_story.user, config: "default")
-      visit root_path
-      expect(page).to have_selector(selector, visible: :hidden)
     end
   end
 end
