@@ -91,7 +91,7 @@
 >>>>>>> c2abdbeade7f4e039ac8cb56cbdf14adc06a8836
     "markdown-loader": "^7.0.0",
     "prettier": "^2.7.1",
-    "sass": "1.54.0",
+    "sass": "1.54.3",
     "sass-loader": "^13.0.2",
     "storybook-addon-jsx": "^7.3.14",
     "style-loader": "^2.0.0",
