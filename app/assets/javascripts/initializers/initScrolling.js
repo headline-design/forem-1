@@ -105,7 +105,7 @@ function buildTagsHTML(tag) {
   var antifollow = '';
   if (tag.points < 0) {
     antifollow =
-      '<span class="crayons-indicator crayons-indicator--critical crayons-indicator--outlined" title="This tag has negative follow weight">Anti-follow</span>';
+      '<span class="c-indicator c-indicator--danger" title="This tag has negative follow weight">Anti-follow</span>';
   }
 
   return `<div class="crayons-card p-4 m:p-6 flex flex-col single-article" id="follows-${tag.id}" style="border: 1px solid ${tag.color}; box-shadow: 3px 3px 0 ${tag.color}">
@@ -207,6 +207,8 @@ function insertArticles(articles) {
   var list = document.getElementById('substories');
   var newArticlesHTML = '';
   var el = document.getElementById('home-articles-object');
+  var currentUser = userData();
+  var currentUserId = currentUser && currentUser.id;
   if (el) {
     el.outerHTML = '';
   }
@@ -226,9 +228,12 @@ function insertArticles(articles) {
       existingEl.parentElement.classList.contains('crayons-story') &&
       !document.getElementById('video-player-' + article.id)
     ) {
-      existingEl.parentElement.outerHTML = buildArticleHTML(article);
+      existingEl.parentElement.outerHTML = buildArticleHTML(
+        article,
+        currentUserId,
+      );
     } else if (!existingEl) {
-      var newHTML = buildArticleHTML(article);
+      var newHTML = buildArticleHTML(article, currentUserId);
       newArticlesHTML += newHTML;
       initializeReadingListIcons();
     }

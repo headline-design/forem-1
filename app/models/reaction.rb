@@ -13,8 +13,13 @@ class Reaction < ApplicationRecord
 
   # These are categories of reactions that administrators can select
   PRIVILEGED_CATEGORIES = %w[thumbsup thumbsdown vomit].freeze
+  NEGATIVE_PRIVILEGED_CATEGORIES = %w[thumbsdown vomit].freeze
+
   REACTABLE_TYPES = %w[Comment Article User].freeze
   STATUSES = %w[valid invalid confirmed archived].freeze
+
+  # Days to ramp up new user points weight
+  NEW_USER_RAMPUP_DAYS_COUNT = 10
 
   belongs_to :reactable, polymorphic: true
   belongs_to :user
@@ -31,11 +36,13 @@ class Reaction < ApplicationRecord
   # user they might only see readinglist items that are published.
   # See https://github.com/forem/forem/issues/14796
   scope :readinglist, -> { where(category: "readinglist") }
-  scope :for_articles, ->(ids) { where(reactable_type: "Article", reactable_id: ids) }
+  scope :for_articles, ->(ids) { only_articles.where(reactable_id: ids) }
+  scope :only_articles, -> { where(reactable_type: "Article") }
   scope :eager_load_serialized_data, -> { includes(:reactable, :user) }
   scope :article_vomits, -> { where(category: "vomit", reactable_type: "Article") }
   scope :comment_vomits, -> { where(category: "vomit", reactable_type: "Comment") }
   scope :user_vomits, -> { where(category: "vomit", reactable_type: "User") }
+  scope :valid_or_confirmed, -> { where(status: %w[valid confirmed]) }
   scope :related_negative_reactions_for_user, lambda { |user|
     article_vomits.where(reactable_id: user.article_ids)
       .or(comment_vomits.where(reactable_id: user.comment_ids))
@@ -56,6 +63,7 @@ class Reaction < ApplicationRecord
   before_destroy :update_reactable_without_delay, unless: :destroyed_by_association
   after_commit :async_bust
   after_commit :bust_reactable_cache, :update_reactable, on: %i[create update]
+  after_commit :record_field_test_event, on: %i[create]
 
   class << self
     def count_for_article(id)
@@ -79,26 +87,39 @@ class Reaction < ApplicationRecord
     end
 
     # @param user [User] the user who might be spamming the system
+    # @param threshold [Integer] the number of strikes before they are spam
+    # @param include_user_profile [Boolean] do we include the user's profile as part of the "check
+    #        for spamminess"
     #
     # @return [TrueClass] yup, they're spamming the system.
     # @return [FalseClass] they're not (yet) spamming the system
-    def user_has_been_given_too_many_spammy_article_reactions?(user:, threshold: 2)
+    def user_has_been_given_too_many_spammy_article_reactions?(user:, threshold: 2, include_user_profile: false)
+      threshold -= 1 if include_user_profile && user_has_spammy_profile_reaction?(user: user)
       article_vomits.where(reactable_id: user.articles.ids).size > threshold
     end
 
     # @param user [User] the user who might be spamming the system
+    # @param threshold [Integer] the number of strikes before they are spam
+    # @param include_user_profile [Boolean] do we include the user's profile as part of the "check
+    #        for spamminess"
     #
     # @return [TrueClass] yup, they're spamming the system.
     # @return [FalseClass] they're not (yet) spamming the system
-    def user_has_been_given_too_many_spammy_comment_reactions?(user:, threshold: 2)
+    def user_has_been_given_too_many_spammy_comment_reactions?(user:, threshold: 2, include_user_profile: false)
+      threshold -= 1 if include_user_profile && user_has_spammy_profile_reaction?(user: user)
       comment_vomits.where(reactable_id: user.comments.ids).size > threshold
+    end
+
+    # @param user [User] the user who might be spamming the system
+    def user_has_spammy_profile_reaction?(user:)
+      user_vomits.exists?(reactable_id: user.id)
     end
   end
 
   # no need to send notification if:
   # - reaction is negative
   # - receiver is the same user as the one who reacted
-  # - receive_notification is disabled
+  # - reaction status is marked invalid
   def skip_notification_for?(_receiver)
     reactor_id = case reactable
                  when User
@@ -107,7 +128,7 @@ class Reaction < ApplicationRecord
                    reactable.user_id
                  end
 
-    points.negative? || (user_id == reactor_id)
+    (status == "invalid") || points.negative? || (user_id == reactor_id)
   end
 
   def vomit_on_user?
@@ -123,7 +144,7 @@ class Reaction < ApplicationRecord
   end
 
   def negative?
-    category == "vomit" || category == "thumbsdown"
+    NEGATIVE_PRIVILEGED_CATEGORIES.include?(category)
   end
 
   private
@@ -158,16 +179,27 @@ class Reaction < ApplicationRecord
 
   def assign_points
     base_points = BASE_POINTS.fetch(category, 1.0)
+
+    # Ajust for certain states
     base_points = 0 if status == "invalid"
     base_points /= 2 if reactable_type == "User"
     base_points *= 2 if status == "confirmed"
+
+    unless persisted? # Actions we only want to apply upon initial creation
+      # Author's comment reaction counts for more weight on to their own posts. (5.0 vs 1.0)
+      base_points *= 5 if positive_reaction_to_comment_on_own_article?
+
+      # New users will have their reaction weight gradually ramp by 0.1 from 0 to 1.0.
+      base_points *= new_user_adjusted_points if new_untrusted_user # New users get minimal reaction weight
+    end
     self.points = user ? (base_points * user.reputation_modifier) : -5
   end
 
   def permissions
-    errors.add(:category, "is not valid.") if negative_reaction_from_untrusted_user?
+    errors.add(:category, I18n.t("models.reaction.is_not_valid")) if negative_reaction_from_untrusted_user?
+    return unless reactable_type == "Article" && !reactable&.published
 
-    errors.add(:reactable_id, "is not valid.") if reactable_type == "Article" && !reactable&.published
+    errors.add(:reactable_id, I18n.t("models.reaction.is_not_valid"))
   end
 
   def negative_reaction_from_untrusted_user?
@@ -178,5 +210,33 @@ class Reaction < ApplicationRecord
 
   def notify_slack_channel_about_vomit_reaction
     Slack::Messengers::ReactionVomit.call(reaction: self)
+  end
+
+  def positive_reaction_to_comment_on_own_article?
+    BASE_POINTS.fetch(category, 1.0).positive? &&
+      reactable_type == "Comment" &&
+      reactable&.commentable&.user_id == user_id
+  end
+
+  def new_user_adjusted_points
+    ((Time.current - user.registered_at).seconds.in_days / NEW_USER_RAMPUP_DAYS_COUNT)
+  end
+
+  def new_untrusted_user
+    user.registered_at > NEW_USER_RAMPUP_DAYS_COUNT.days.ago && !user.trusted? && !user.any_admin?
+  end
+
+  # @see AbExperiment::GoalConversionHandler
+  def record_field_test_event
+    # TODO: Remove once we know that this test is not over-heating the application.  That would be a
+    # few days after the deploy to DEV of this change.
+    return unless FeatureFlag.accessible?(:field_test_event_for_reactions)
+    return if FieldTest.config["experiments"].nil?
+    return unless PUBLIC_CATEGORIES.include?(category)
+    return unless reactable.is_a?(Article)
+    return unless user_id
+
+    Users::RecordFieldTestEventWorker
+      .perform_async(user_id, AbExperiment::GoalConversionHandler::USER_CREATES_ARTICLE_REACTION_GOAL)
   end
 end

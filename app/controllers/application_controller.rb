@@ -9,10 +9,9 @@ class ApplicationController < ActionController::Base
 
   include SessionCurrentUser
   include ValidRequest
-  include Pundit
+  include Pundit::Authorization
   include CachingHeaders
   include ImageUploads
-  include VerifySetupCompleted
   include DevelopmentDependencyChecks if Rails.env.development?
   include EdgeCacheSafetyCheck unless Rails.env.production?
   include Devise::Controllers::Rememberable
@@ -29,6 +28,8 @@ class ApplicationController < ActionController::Base
       tags: ["controller_name:#{controller_name}", "path:#{request.fullpath}"],
     )
   end
+
+  rescue_from ApplicationPolicy::UserSuspendedError, with: :respond_with_user_suspended
 
   PUBLIC_CONTROLLERS = %w[async_info
                           confirmations
@@ -50,6 +51,25 @@ class ApplicationController < ActionController::Base
   ].freeze
   private_constant :CONTENT_CHANGE_PATHS
 
+  # @!scope class
+  # @!attribute [w] api_action
+  #   If set to true, all actions on the class (and subclasses) will be considered "api_actions"
+  #
+  #   @param input [Boolean]
+  #   @see ApplicationController#api_action?
+  #   @see ApplicationController#verify_private_forem
+  #   @see https://api.rubyonrails.org/classes/Class.html#method-i-class_attribute Class.class_attribute
+  class_attribute :api_action, default: false, instance_writer: false
+
+  # @!scope instance
+  # @!attribute [r] api_action?
+  #   By default, all actions are *not* an `api_action?`
+  #   @return [TrueClass] if the current requested action is for the API
+  #   @return [FalseClass] if the current requested action is not part of the API
+  #   @see Api::V0::ApiController
+  #   @see ApplicationController.api_action
+  #   @see ApplicationController#verify_private_forem
+
   def verify_private_forem
     return if controller_name.in?(PUBLIC_CONTROLLERS)
     return if self.class.module_parent.to_s == "Admin"
@@ -65,21 +85,32 @@ class ApplicationController < ActionController::Base
     end
   end
 
+  # When called, raise ActiveRecord::RecordNotFound.
+  #
+  # @raise [ActiveRecord::RecordNotFound] when called
   def not_found
     raise ActiveRecord::RecordNotFound, "Not Found"
   end
 
+  # When called, raise ActionController::RoutingError.
+  # @raise [ActionController::RoutingError] when called
   def routing_error
     raise ActionController::RoutingError, "Routing Error"
   end
 
+  # When called render unauthorized JSON status and raise Pundit::NotAuthorizedError
+  #
+  # @raise [Pundit::NotAuthorizedError]
+  #
+  # @note [@jeremyf] It's a little surprising that we both render a JSON response and raise an
+  #       exception.
   def not_authorized
-    render json: { error: "Error: not authorized" }, status: :unauthorized
-    raise NotAuthorizedError, "Unauthorized"
+    render json: { error: I18n.t("application_controller.not_authorized") }, status: :unauthorized
+    raise Pundit::NotAuthorizedError, "Unauthorized"
   end
 
   def bad_request
-    render json: { error: "Error: Bad Request" }, status: :bad_request
+    render json: { error: I18n.t("application_controller.bad_request") }, status: :bad_request
   end
 
   def error_too_many_requests(exc)
@@ -87,15 +118,40 @@ class ApplicationController < ActionController::Base
     render json: { error: exc.message, status: 429 }, status: :too_many_requests
   end
 
-  def authenticate_user!
-    if current_user
-      Honeycomb.add_field("current_user_id", current_user.id)
-      return
-    end
+  # This method is envisioned as a :before_action callback.
+  #
+  # @return [TrueClass] if we have a current_user
+  # @return [FalseClass] if we don't have a current_user
+  #
+  # @see {#authenticate_user!} for when you want to raise an error if we don't have a current user.
+  def authenticate_user
+    return false unless current_user
 
+    Honeycomb.add_field("current_user_id", current_user.id)
+    true
+  end
+
+  # @deprecated Use {#authenticate_user} and #{ApplicationPolicy}.
+  #
+  # When we don't have a current user, render a response that prompts the requester to authenticate.
+  # This function circumvents the work that should be done in the {ApplicationPolicy} layer.
+  #
+  # @return [TrueClass] if we have an authenticated user
+  #
+  # @note This method is envisioned as a :before_action callback.
+  #
+  # @see {#authenticate_user}
+  # @see {ApplicationPolicy} for discussion around authentication and authorization.
+  def authenticate_user!
+    return true if authenticate_user
+
+    respond_with_request_for_authentication
+  end
+
+  def respond_with_request_for_authentication
     respond_to do |format|
       format.html { redirect_to sign_up_path }
-      format.json { render json: { error: "Please sign in" }, status: :unauthorized }
+      format.json { render json: { error: I18n.t("application_controller.please_sign_in") }, status: :unauthorized }
     end
   end
 
@@ -132,8 +188,16 @@ class ApplicationController < ActionController::Base
     onboarding_path
   end
 
-  def raise_suspended
-    raise SuspendedError if current_user&.suspended?
+  # @deprecated This is a policy related question and should be part of an ApplicationPolicy
+  def check_suspended
+    return unless current_user&.suspended?
+
+    respond_with_user_suspended
+  end
+
+  def respond_with_user_suspended
+    response.status = :forbidden
+    render "pages/forbidden"
   end
 
   def internal_navigation?
@@ -164,10 +228,6 @@ class ApplicationController < ActionController::Base
 
   def anonymous_user
     User.new(ip_address: request.env["HTTP_FASTLY_CLIENT_IP"] || request.env["HTTP_X_FORWARDED_FOR"])
-  end
-
-  def api_action?
-    self.class.to_s.start_with?("Api::")
   end
 
   def initialize_stripe
@@ -212,19 +272,17 @@ class ApplicationController < ActionController::Base
     Settings::General.admin_action_taken_at = Time.current # Used as cache key
   end
 
-  # To ensure that components are sent back as HTML, we wrap their rendering in
-  # this helper method
-  def render_component(component_class, *args, **kwargs)
-    render component_class.new(*args, **kwargs), content_type: "text/html"
-  end
-
   private
 
   def configure_permitted_parameters
     devise_parameter_sanitizer.permit(:sign_up, keys: %i[username name profile_image profile_image_url])
+<<<<<<< HEAD
     devise_parameter_sanitizer.permit(:sign_in) do |user_params|
       user_params.permit(:email, :password, :remember_me, :address)
     end
+=======
+    devise_parameter_sanitizer.permit(:accept_invitation, keys: %i[name])
+>>>>>>> c2abdbeade7f4e039ac8cb56cbdf14adc06a8836
   end
 
   def internal_nav_param

@@ -68,17 +68,17 @@ it('should close when the close button is clicked', async () => {
 
 it('should close when Escape is pressed', () => {
   const onClose = jest.fn();
-  const { container } = render(
+  render(
     <Modal title="This is a modal title" onClose={onClose}>
       This is the modal body content
     </Modal>,
   );
 
-  userEvent.type(container, '{esc}');
+  userEvent.keyboard('{Escape}');
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
-it("shouldn't close on outside click by default", () => {
+it("shouldn't close on outside click by default", async () => {
   const onClose = jest.fn();
   const { getByText } = render(
     <div>
@@ -89,11 +89,11 @@ it("shouldn't close on outside click by default", () => {
     </div>,
   );
 
-  userEvent.click(getByText('Outside content'));
+  await userEvent.click(getByText('Outside content'));
   expect(onClose).not.toHaveBeenCalled();
 });
 
-it('should close on click outside, if enabled', () => {
+it('should close on click outside, if enabled', async () => {
   const onClose = jest.fn();
   const { getByText } = render(
     <div>
@@ -101,14 +101,14 @@ it('should close on click outside, if enabled', () => {
       <Modal
         title="This is a modal title"
         onClose={onClose}
-        closeOnClickOutside
+        backdropDismissible
       >
         This is the modal body content
       </Modal>
     </div>,
   );
 
-  userEvent.click(getByText('Outside content'));
+  await userEvent.click(getByText('Outside content'));
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
@@ -130,9 +130,9 @@ it('should render with additional class names', async () => {
   ).toEqual(true);
 });
 
-it('should render with an overlay', async () => {
+it('should render with a backdrop', async () => {
   const { getByTestId } = render(
-    <Modal title="This is a modal title" overlay onClose={jest.fn()}>
+    <Modal title="This is a modal title" backdrop onClose={jest.fn()}>
       This is the modal body content
     </Modal>,
   );
@@ -144,12 +144,7 @@ it('should render with an overlay', async () => {
 
 it('should render with a different size modal', async () => {
   const { getByTestId } = render(
-    <Modal
-      title="This is a modal title"
-      size="large"
-      className="some-additional-class-name"
-      onClose={jest.fn()}
-    >
+    <Modal title="This is a modal title" size="large" onClose={jest.fn()}>
       This is the modal body content
     </Modal>,
   );

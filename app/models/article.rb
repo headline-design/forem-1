@@ -8,10 +8,27 @@ class Article < ApplicationRecord
   acts_as_taggable_on :tags
   resourcify
 
-  include StringAttributeCleaner.for(:canonical_url, on: :before_save)
+  include StringAttributeCleaner.nullify_blanks_for(:canonical_url, on: :before_save)
   DEFAULT_FEED_PAGINATION_WINDOW_SIZE = 50
 
-  attr_accessor :publish_under_org
+  # When we cache an entity, either {User} or {Organization}, these are the names of the attributes
+  # we cache.
+  #
+  # @note I would prefer that this constant were in the {Article::CachedEntity} namespace, but it
+  #       didn't work out well.  Further, since Organization doesn't really know about
+  #       Articles::CachedEntity, I'd rather it not "peek" into a class for which it has no
+  #       knowledge.
+  #
+  # @note [@jeremyf] I have added the profile_image attribute, even though that's not one of the
+  #       Articles::CachedEntity attributes.  This is necessary to detect the change.
+  #
+  # @see Articles::CachedEntity caching strategy for entity attributes
+  ATTRIBUTES_CACHED_FOR_RELATED_ENTITY = %i[name profile_image profile_image_url slug username].freeze
+
+  # admin_update was added as a hack to bypass published_at validation when admin is updating
+  # TODO: [@lightalloy] remove published_at validation from the model and
+  # move it to the services where the create/update takes place to avoid using hacks
+  attr_accessor :publish_under_org, :admin_update
   attr_writer :series
 
   delegate :name, to: :user, prefix: true
@@ -29,14 +46,64 @@ class Article < ApplicationRecord
 
   # The date that we began limiting the number of user mentions in an article.
   MAX_USER_MENTION_LIVE_AT = Time.utc(2021, 4, 7).freeze
-  UNIQUE_URL_ERROR = "has already been taken. " \
-                     "Email #{ForemInstance.email} for further details.".freeze
   PROHIBITED_UNICODE_CHARACTERS_REGEX = /[\u202a-\u202e]/ # BIDI embedding controls
+
+  MAX_TAG_LIST_SIZE = 4
+
+  # Filter out anything that isn't a word, space, punctuation mark, or
+  # recognized emoji.
+  # See: https://github.com/forem/forem/pull/16787#issuecomment-1062044359
+  # rubocop:disable Lint/DuplicateRegexpCharacterClassElement
+  TITLE_CHARACTERS_ALLOWED = /[^
+    [:word:]
+    [:space:]
+    [:punct:]
+    \u00a3        # GBP symbol
+    \u00a9        # Copyright symbol
+    \u00ae        # Registered trademark symbol
+    \u200d        # Zero-width joiner, for multipart emojis such as family
+    \u203c        # !! emoji
+    \u20e3        # Combining enclosing keycap
+    \u2122        # Trademark symbol
+    \u2139        # Information symbol
+    \u2194-\u2199 # Arrow symbols
+    \u21a9-\u21aa # More arrows
+    \u231a        # Watch emoji
+    \u231b        # Hourglass emoji
+    \u2328        # Keyboard emoji
+    \u23cf        # Eject symbol
+    \u23e9-\u23f3 # Various VCR-actions emoji and clocks
+    \u23f8-\u23fa # More VCR emoji
+    \u24c2        # Blue circle with a white M in it
+    \u25aa        # Black box
+    \u25ab        # White box
+    \u25b6        # VCR-style play emoji
+    \u25c0        # VCR-style play backwards emoji
+    \u25fb-\u25fe # More black and white squares
+    \u2600-\u273f # Weather, zodiac, coffee, hazmat, cards, music, other misc emoji
+    \u2934        # Curved arrow pointing up to the right
+    \u2935        # Curved arrow pointing down to the right
+    \u2b00-\u2bff # More arrows, geometric shapes
+    \u3030        # Squiggly line
+    \u303d        # Either a line chart plummeting or the letter M, not sure
+    \u3297        # Circled Ideograph Congratulation
+    \u3299        # Circled Ideograph Secret
+    \u20ac        # Euro symbol (€)
+    \u{1f000}-\u{1ffff} # More common emoji
+  ]+/m
+  # rubocop:enable Lint/DuplicateRegexpCharacterClassElement
+
+  def self.unique_url_error
+    I18n.t("models.article.unique_url", email: ForemInstance.contact_email)
+  end
 
   has_one :discussion_lock, dependent: :delete
 
   has_many :mentions, as: :mentionable, inverse_of: :mentionable, dependent: :delete_all
   has_many :comments, as: :commentable, inverse_of: :commentable, dependent: :nullify
+  has_many :context_notifications, as: :context, inverse_of: :context, dependent: :delete_all
+  has_many :context_notifications_published, -> { where(context_notifications: { action: "Published" }) },
+           as: :context, inverse_of: :context, class_name: "ContextNotification"
   has_many :html_variant_successes, dependent: :nullify
   has_many :html_variant_trials, dependent: :nullify
   has_many :notification_subscriptions, as: :notifiable, inverse_of: :notifiable, dependent: :delete_all
@@ -58,17 +125,20 @@ class Article < ApplicationRecord
            inverse_of: :commentable,
            class_name: "Comment"
 
-  validates :body_markdown, bytesize: { maximum: 800.kilobytes, too_long: "is too long." }
+  validates :body_markdown, bytesize: {
+    maximum: 800.kilobytes,
+    too_long: proc { I18n.t("models.article.is_too_long") }
+  }
   validates :body_markdown, length: { minimum: 0, allow_nil: false }
   validates :body_markdown, uniqueness: { scope: %i[user_id title] }
   validates :cached_tag_list, length: { maximum: 126 }
   validates :canonical_url,
-            uniqueness: { allow_nil: true, scope: :published, message: UNIQUE_URL_ERROR },
+            uniqueness: { allow_nil: true, scope: :published, message: unique_url_error },
             if: :published?
   validates :canonical_url, url: { allow_blank: true, no_local: true, schemes: %w[https http] }
   validates :comments_count, presence: true
   validates :feed_source_url,
-            uniqueness: { allow_nil: true, scope: :published, message: UNIQUE_URL_ERROR },
+            uniqueness: { allow_nil: true, scope: :published, message: unique_url_error },
             if: :published?
   validates :feed_source_url, url: { allow_blank: true, no_local: true, schemes: %w[https http] }
   validates :main_image, url: { allow_blank: true, schemes: %w[https http] }
@@ -88,9 +158,10 @@ class Article < ApplicationRecord
   validates :video_source_url, url: { allow_blank: true, schemes: ["https"] }
   validates :video_state, inclusion: { in: %w[PROGRESSING COMPLETED] }, allow_nil: true
   validates :video_thumbnail_url, url: { allow_blank: true, schemes: %w[https http] }
+  validate :future_or_current_published_at, on: :create
+  validate :has_correct_published_at?, on: :update, unless: :admin_update
 
   validate :canonical_url_must_not_have_spaces
-  validate :past_or_present_date
   validate :validate_collection_permission
   validate :validate_tag
   validate :validate_video
@@ -99,9 +170,10 @@ class Article < ApplicationRecord
   validate :validate_co_authors_must_not_be_the_same, unless: -> { co_author_ids.blank? }
   validate :validate_co_authors_exist, unless: -> { co_author_ids.blank? }
 
-  before_validation :evaluate_markdown, :create_slug
+  before_validation :evaluate_markdown, :create_slug, :set_published_date
   before_validation :remove_prohibited_unicode_characters
-  before_save :update_cached_user
+  before_validation :normalize_title
+  before_save :set_cached_entities
   before_save :set_all_dates
 
   before_save :calculate_base_scores
@@ -112,7 +184,6 @@ class Article < ApplicationRecord
 
   after_save :create_conditional_autovomits
   after_save :bust_cache
-  after_save :notify_slack_channel_about_publication
 
   after_update_commit :update_notifications, if: proc { |article|
                                                    article.notifications.any? && !article.saved_changes.empty?
@@ -121,7 +192,8 @@ class Article < ApplicationRecord
     article.saved_change_to_user_id?
   }
 
-  after_commit :async_score_calc, :touch_collection, :enrich_image_attributes, on: %i[create update]
+  after_commit :async_score_calc, :touch_collection, :enrich_image_attributes, :record_field_test_event,
+               on: %i[create update]
 
   # The trigger `update_reading_list_document` is used to keep the `articles.reading_list_document` column updated.
   #
@@ -160,7 +232,12 @@ class Article < ApplicationRecord
     SQL
   end
 
+  # @todo Enforce the serialization class (e.g., Articles::CachedEntity)
+  # @see https://api.rubyonrails.org/classes/ActiveRecord/AttributeMethods/Serialization/ClassMethods.html#method-i-serialize
   serialize :cached_user
+
+  # @todo Enforce the serialization class (e.g., Articles::CachedEntity)
+  # @see https://api.rubyonrails.org/classes/ActiveRecord/AttributeMethods/Serialization/ClassMethods.html#method-i-serialize
   serialize :cached_organization
 
   # TODO: [@rhymes] Rename the article column and the trigger name.
@@ -187,6 +264,8 @@ class Article < ApplicationRecord
       .where("published_at <= ?", Time.current)
   }
   scope :unpublished, -> { where(published: false) }
+
+  scope :not_authored_by, ->(user_id) { where.not(user_id: user_id) }
 
   # [@jeremyf] For approved articles is there always an assumption of
   #            published?  Regardless, the scope helps us deal with
@@ -241,8 +320,7 @@ class Article < ApplicationRecord
     end
   }
 
-  # NOTE: @citizen428
-  # I'd usually avoid using Arel directly like this. However, none of the more
+  # We usually try to avoid using Arel directly like this. However, none of the more
   # straight-forward ways of negating the above scope worked:
   # 1. A subquery doesn't work because we're not dealing with a simple NOT IN scenario.
   # 2. where.not(cached_tagged_with_any(tags).where_values_hash) doesn't work because where_values_hash
@@ -284,18 +362,21 @@ class Article < ApplicationRecord
 
     dir = "desc" unless %w[asc desc].include?(dir)
 
-    column =
-      case kind
-      when "creation"  then :created_at
-      when "views"     then :page_views_count
-      when "reactions" then :public_reactions_count
-      when "comments"  then :comments_count
-      when "published" then :published_at
-      else
-        :created_at
-      end
-
-    order(column => dir.to_sym)
+    case kind
+    when "creation"
+      order(created_at: dir)
+    when "views"
+      order(page_views_count: dir)
+    when "reactions"
+      order(public_reactions_count: dir)
+    when "comments"
+      order(comments_count: dir)
+    when "published"
+      # NOTE: For recently published, we further filter to only published posts
+      order(published_at: dir).published
+    else
+      order(created_at: dir)
+    end
   }
 
   # @note This includes the `featured` scope, which may or may not be
@@ -361,6 +442,10 @@ class Article < ApplicationRecord
     end
   end
 
+  def scheduled?
+    published_at? && published_at.future?
+  end
+
   def search_id
     "article_#{id}"
   end
@@ -372,7 +457,7 @@ class Article < ApplicationRecord
         .tr("\n", " ")
         .strip
     else
-      "A post by #{user.name}"
+      I18n.t("models.article.a_post_by", user_name: user.name)
     end
   end
 
@@ -397,7 +482,7 @@ class Article < ApplicationRecord
   end
 
   def current_state_path
-    published ? "/#{username}/#{slug}" : "/#{username}/#{slug}?preview=#{password}"
+    published && !scheduled? ? "/#{username}/#{slug}" : "/#{username}/#{slug}?preview=#{password}"
   end
 
   def has_frontmatter?
@@ -427,18 +512,20 @@ class Article < ApplicationRecord
     return unless edited?
 
     if edited_at.year == Time.current.year
-      edited_at.strftime("%b %e")
+      I18n.l(edited_at, format: :short)
     else
-      edited_at.strftime("%b %e '%y")
+      I18n.l(edited_at, format: :short_with_yy)
     end
   end
 
   def readable_publish_date
     relevant_date = displayable_published_at
-    if relevant_date && relevant_date.year == Time.current.year
-      relevant_date&.strftime("%b %-e")
-    else
-      relevant_date&.strftime("%b %-e '%y")
+    return unless relevant_date
+
+    if relevant_date.year == Time.current.year
+      I18n.l(relevant_date, format: :short)
+    elsif relevant_date
+      I18n.l(relevant_date, format: :short_with_yy)
     end
   end
 
@@ -486,8 +573,7 @@ class Article < ApplicationRecord
     update_columns(score: score,
                    privileged_users_reaction_points_sum: reactions.privileged_category.sum(:points),
                    comment_score: comments.sum(:score),
-                   hotness_score: BlackBox.article_hotness_score(self),
-                   spaminess_rating: BlackBox.calculate_spaminess(self))
+                   hotness_score: BlackBox.article_hotness_score(self))
   end
 
   def co_author_ids_list=(list_of_co_author_ids)
@@ -554,6 +640,16 @@ class Article < ApplicationRecord
     self.path = calculated_path.downcase
   end
 
+  def normalize_title
+    return unless title
+
+    self.title = title
+      .gsub(TITLE_CHARACTERS_ALLOWED, " ")
+      # Coalesce runs of whitespace into a single space character
+      .gsub(/\s+/, " ")
+      .strip
+  end
+
   def evaluate_markdown
     fixed_body_markdown = MarkdownProcessor::Fixer::FixAll.call(body_markdown || "")
     parsed = FrontMatterParser::Parser.new(:md).call(fixed_body_markdown)
@@ -599,7 +695,7 @@ class Article < ApplicationRecord
   end
 
   def update_notifications
-    Notification.update_notifications(self, "Published")
+    Notification.update_notifications(self, I18n.t("models.article.published"))
   end
 
   def update_notification_subscriptions
@@ -614,17 +710,21 @@ class Article < ApplicationRecord
       article_ids.concat organization.article_ids
     end
     # perform busting cache in chunks in case there're a lot of articles
-    (article_ids.uniq.sort - [id]).each_slice(10) do |ids|
-      Articles::BustMultipleCachesWorker.perform_async(ids)
-    end
+    # NOTE: `perform_bulk` takes an array of arrays as argument. Since the worker
+    # takes an array of ids as argument, this becomes triple-nested.
+    job_params = (article_ids.uniq.sort - [id]).each_slice(10).to_a.map { |ids| [ids] }
+    Articles::BustMultipleCachesWorker.perform_bulk(job_params)
   end
 
   def evaluate_front_matter(front_matter)
     self.title = front_matter["title"] if front_matter["title"].present?
     set_tag_list(front_matter["tags"]) if front_matter["tags"].present?
     self.published = front_matter["published"] if %w[true false].include?(front_matter["published"].to_s)
-    self.published_at = parse_date(front_matter["date"]) if published
-    self.main_image = determine_image(front_matter)
+
+    self.published_at = front_matter["published_at"] if front_matter["published_at"]
+    self.published_at ||= parse_date(front_matter["date"]) if published
+
+    set_main_image(front_matter)
     self.canonical_url = front_matter["canonical_url"] if front_matter["canonical_url"].present?
 
     update_description = front_matter["description"].present? || front_matter["title"].present?
@@ -634,16 +734,14 @@ class Article < ApplicationRecord
     self.collection_id = Collection.find_series(front_matter["series"], user).id if front_matter["series"].present?
   end
 
-  def determine_image(front_matter)
-    # In order to clear out the cover_image, we check for the key in the front_matter.
-    # If the key exists, we use the value from it (a url or `nil`).
-    # Otherwise, we fall back to the main_image on the article.
-    has_cover_image = front_matter.include?("cover_image")
-
-    if has_cover_image && (front_matter["cover_image"].present? || main_image)
-      front_matter["cover_image"]
-    else
-      main_image
+  def set_main_image(front_matter)
+    # At one point, we have set the main_image based on the front matter. Forever will that now dictate the behavior.
+    if main_image_from_frontmatter?
+      self.main_image = front_matter["cover_image"]
+    elsif front_matter.key?("cover_image")
+      # They've chosen the set cover image in the front matter, so we'll proceed with that assumption.
+      self.main_image = front_matter["cover_image"]
+      self.main_image_from_frontmatter = true
     end
   end
 
@@ -658,7 +756,7 @@ class Article < ApplicationRecord
     add_tag_adjustments_to_tag_list
 
     # check there are not too many tags
-    return errors.add(:tag_list, "exceed the maximum of 4 tags") if tag_list.size > 4
+    return errors.add(:tag_list, I18n.t("models.article.too_many_tags")) if tag_list.size > MAX_TAG_LIST_SIZE
 
     # check tags names aren't too long and don't contain non alphabet characters
     tag_list.each do |tag|
@@ -685,48 +783,59 @@ class Article < ApplicationRecord
   def validate_video
     if published && video_state == "PROGRESSING"
       return errors.add(:published,
-                        "cannot be set to true if video is still processing")
+                        I18n.t("models.article.video_processing"))
     end
 
     return unless video.present? && user.created_at > 2.weeks.ago
 
-    errors.add(:video, "cannot be added by member without permission")
+    errors.add(:video, I18n.t("models.article.video_unpermitted"))
   end
 
   def validate_collection_permission
     return unless collection && collection.user_id != user_id
 
-    errors.add(:collection_id, "must be one you have permission to post to")
+    errors.add(:collection_id, I18n.t("models.article.series_unpermitted"))
   end
 
   def validate_co_authors
     return if co_author_ids.exclude?(user_id)
 
-    errors.add(:co_author_ids, "must not be the same user as the author")
+    errors.add(:co_author_ids, I18n.t("models.article.same_author"))
   end
 
   def validate_co_authors_must_not_be_the_same
     return if co_author_ids.uniq.count == co_author_ids.count
 
-    errors.add(:base, "co-author IDs must be unique")
+    errors.add(:base, I18n.t("models.article.unique_coauthor"))
   end
 
   def validate_co_authors_exist
     return if User.where(id: co_author_ids).count == co_author_ids.count
 
-    errors.add(:co_author_ids, "must be valid user IDs")
+    errors.add(:co_author_ids, I18n.t("models.article.invalid_coauthor"))
   end
 
-  def past_or_present_date
-    return unless published_at && published_at > Time.current
+  def future_or_current_published_at
+    # allow published_at in the future or within 15 minutes in the past
+    return if !published || published_at > Time.current - (15 * 60 * 60)
 
-    errors.add(:date_time, "must be entered in DD/MM/YYYY format with current or past date")
+    errors.add(:published_at, I18n.t("models.article.future_or_current_published_at"))
+  end
+
+  def has_correct_published_at?
+    return unless published_at_was
+    # don't allow editing published_at if an article has already been published
+    # allow changes within one minute in case of editing via frontmatter w/o specifying seconds
+    return unless published_was && published_at_was < Time.current &&
+      changes["published_at"] && !(published_at_was - published_at).between?(-60, 60)
+
+    errors.add(:published_at, I18n.t("models.article.immutable_published_at"))
   end
 
   def canonical_url_must_not_have_spaces
     return unless canonical_url.to_s.match?(/[[:space:]]/)
 
-    errors.add(:canonical_url, "must not have spaces")
+    errors.add(:canonical_url, I18n.t("models.article.must_not_have_spaces"))
   end
 
   def user_mentions_in_markdown
@@ -736,7 +845,8 @@ class Article < ApplicationRecord
     mentions_count = Nokogiri::HTML(processed_html).css(".mentioned-user").size
     return if mentions_count <= Settings::RateLimit.mention_creation
 
-    errors.add(:base, "You cannot mention more than #{Settings::RateLimit.mention_creation} users in a post!")
+    errors.add(:base,
+               I18n.t("models.article.mention_too_many", count: Settings::RateLimit.mention_creation))
   end
 
   def create_slug
@@ -758,13 +868,12 @@ class Article < ApplicationRecord
     self.password = SecureRandom.hex(60)
   end
 
-  def update_cached_user
+  def set_cached_entities
     self.cached_organization = organization ? Articles::CachedEntity.from_object(organization) : nil
     self.cached_user = user ? Articles::CachedEntity.from_object(user) : nil
   end
 
   def set_all_dates
-    set_published_date
     set_featured_number
     set_crossposted_at
     set_last_comment_at
@@ -822,7 +931,6 @@ class Article < ApplicationRecord
 
   def calculate_base_scores
     self.hotness_score = 1000 if hotness_score.blank?
-    self.spaminess_rating = 0 if new_record?
   end
 
   def create_conditional_autovomits
@@ -837,12 +945,7 @@ class Article < ApplicationRecord
     collection.touch if collection && previous_changes.present?
   end
 
-  def notify_slack_channel_about_publication
-    Slack::Messengers::ArticlePublished.call(article: self)
-  end
-
   def enrich_image_attributes
-    return unless FeatureFlag.enabled?(:detect_animated_images)
     return unless saved_change_to_attribute?(:processed_html)
 
     ::Articles::EnrichImageAttributesWorker.perform_async(id)
@@ -852,5 +955,13 @@ class Article < ApplicationRecord
     return unless title&.match?(PROHIBITED_UNICODE_CHARACTERS_REGEX)
 
     self.title = title.gsub(PROHIBITED_UNICODE_CHARACTERS_REGEX, "")
+  end
+
+  def record_field_test_event
+    return unless published?
+    return if FieldTest.config["experiments"].nil?
+
+    Users::RecordFieldTestEventWorker
+      .perform_async(user_id, AbExperiment::GoalConversionHandler::USER_PUBLISHES_POST_GOAL)
   end
 end

@@ -1,4 +1,7 @@
-import { toggleFlagUserModal } from '../packs/flagUserModal';
+import { toggleFlagUserModal } from '../packs/toggleUserFlagModal';
+import { toggleSuspendUserModal } from '../packs/toggleUserSuspensionModal';
+import { toggleUnpublishPostModal } from '../packs/unpublishPostModal';
+import { toggleUnpublishAllPostsModal } from '../packs/modals/unpublishAllPosts';
 import { request } from '@utilities/http';
 
 export function addCloseListener() {
@@ -149,11 +152,14 @@ export async function updateExperienceLevel(
   }
 }
 
-const adminUnpublishArticle = async (id, username, slug) => {
+const adminFeatureArticle = async (id, featured) => {
   try {
-    const response = await request(`/articles/${id}/admin_unpublish`, {
+    const response = await request(`/articles/${id}/admin_featured_toggle`, {
       method: 'PATCH',
-      body: JSON.stringify({ id, username, slug }),
+      body: JSON.stringify({
+        id,
+        article: { featured: featured === 'true' ? 0 : 1 },
+      }),
       credentials: 'same-origin',
     });
 
@@ -175,12 +181,6 @@ const adminUnpublishArticle = async (id, username, slug) => {
     });
   }
 };
-
-function toggleSubmitContainer() {
-  document
-    .getElementById('adjustment-reason-container')
-    .classList.toggle('hidden');
-}
 
 function clearAdjustmentReason() {
   document.getElementById('tag-adjustment-reason').value = '';
@@ -242,7 +242,6 @@ async function adjustTag(el) {
         el.value = '';
       }
 
-      toggleSubmitContainer();
       clearAdjustmentReason();
 
       if (outcome.result === 'addition') {
@@ -297,18 +296,8 @@ export function handleAdjustTagBtn(btn) {
       }
       btn.classList.toggle('active');
     });
-    if (btn.classList.contains('active')) {
-      document
-        .getElementById('adjustment-reason-container')
-        .classList.remove('hidden');
-    } else {
-      document
-        .getElementById('adjustment-reason-container')
-        .classList.add('hidden');
-    }
   } else {
     btn.classList.toggle('active');
-    toggleSubmitContainer();
   }
 }
 
@@ -317,10 +306,6 @@ function handleAdminInput() {
 
   if (addTagInput) {
     addTagInput.addEventListener('focus', () => {
-      document
-        .getElementById('adjustment-reason-container')
-        .classList.remove('hidden');
-
       const activeTagBtns = Array.from(
         document.querySelectorAll('button.adjustable-tag.active'),
       );
@@ -330,7 +315,6 @@ function handleAdminInput() {
     });
     addTagInput.addEventListener('focusout', () => {
       if (addTagInput.value === '') {
-        toggleSubmitContainer();
       }
     });
   }
@@ -345,25 +329,23 @@ export function addAdjustTagListeners() {
     },
   );
 
-  const adjustTagSubmitBtn = document.getElementById('tag-adjust-submit');
-  if (adjustTagSubmitBtn) {
-    adjustTagSubmitBtn.addEventListener('click', (e) => {
+  const form = document.getElementById('tag-adjust-submit')?.form;
+  if (form) {
+    form.addEventListener('submit', (e) => {
       e.preventDefault();
-      const textArea = document.getElementById('tag-adjustment-reason');
+
       const dataSource =
-        document.querySelector('button.adjustable-tag.active') ||
+        document.querySelector('button.adjustable-tag.active') ??
         document.getElementById('admin-add-tag');
 
-      if (textArea.checkValidity()) {
-        adjustTag(dataSource);
-      }
+      adjustTag(dataSource);
     });
 
     handleAdminInput();
   }
 }
 
-export function addBottomActionsListeners() {
+export function addModActionsListeners() {
   addAdjustTagListeners();
   Array.from(document.getElementsByClassName('other-things-btn')).forEach(
     (btn) => {
@@ -398,29 +380,39 @@ export function addBottomActionsListeners() {
     },
   );
 
-  const unpublishArticleBtn = document.getElementById('unpublish-article-btn');
-  if (unpublishArticleBtn) {
-    unpublishArticleBtn.addEventListener('click', () => {
-      const {
-        articleId: id,
-        articleAuthor: username,
-        articleSlug: slug,
-      } = unpublishArticleBtn.dataset;
-
-      if (confirm('You are unpublishing this article; are you sure?')) {
-        adminUnpublishArticle(id, username, slug);
-      }
+  const featureArticleBtn = document.getElementById('feature-article-btn');
+  if (featureArticleBtn) {
+    featureArticleBtn.addEventListener('click', () => {
+      const { articleId: id, articleFeatured: featured } =
+        featureArticleBtn.dataset;
+      adminFeatureArticle(id, featured);
     });
   }
 
   document
-    .getElementById('open-flag-user-modal')
+    .getElementById('toggle-flag-user-modal')
     .addEventListener('click', toggleFlagUserModal);
+
+  document
+    .getElementById('suspend-user-btn')
+    ?.addEventListener('click', toggleSuspendUserModal);
+
+  document
+    .getElementById('unsuspend-user-btn')
+    ?.addEventListener('click', toggleSuspendUserModal);
+
+  document
+    .getElementById('unpublish-all-posts-btn')
+    ?.addEventListener('click', toggleUnpublishAllPostsModal);
+
+  document
+    .getElementById('unpublish-article-btn')
+    ?.addEventListener('click', toggleUnpublishPostModal);
 }
 
 export function initializeActionsPanel() {
   initializeHeight();
   addCloseListener();
   addReactionButtonListeners();
-  addBottomActionsListeners();
+  addModActionsListeners();
 }

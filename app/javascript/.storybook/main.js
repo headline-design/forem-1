@@ -14,9 +14,9 @@ module.exports = {
     '@storybook/addon-controls',
     '@storybook/addon-knobs',
     '@storybook/addon-actions',
-    '@storybook/addon-links',
     '@storybook/addon-a11y',
-    '@storybook/addon-notes/register-panel',
+    '@storybook/addon-backgrounds',
+    '@etchteam/storybook-addon-css-variables-theme',
     'storybook-addon-jsx',
     '@whitespace/storybook-addon-html',
     {
@@ -84,6 +84,25 @@ module.exports = {
   },
   babel: async (options) => ({
     ...options,
-    plugins: [...options.plugins, 'inline-react-svg'],
+    plugins: [
+      ...options.plugins,
+      [
+        'inline-react-svg',
+        {
+          svgo: {
+            plugins: [
+              {
+                name: 'preset-default',
+                params: {
+                  overrides: {
+                    removeViewBox: false,
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    ],
   }),
 };

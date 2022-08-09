@@ -1,4 +1,5 @@
 module ApplicationHelper
+<<<<<<< HEAD
   # rubocop:disable Style/OpenStructUse, Performance/OpenStruct
   USER_COLORS = ["#19063A", "#dce9f3"].freeze
 
@@ -25,24 +26,74 @@ module ApplicationHelper
   )
   # rubocop:enable Style/OpenStructUse, Performance/OpenStruct
 
+=======
+>>>>>>> c2abdbeade7f4e039ac8cb56cbdf14adc06a8836
   LARGE_USERBASE_THRESHOLD = 1000
 
-  SUBTITLES = {
-    "week" => "Top posts this week",
-    "month" => "Top posts this month",
-    "year" => "Top posts this year",
-    "infinity" => "All posts",
-    "latest" => "Latest posts"
-  }.freeze
+  # @return [Hash<String, String>] the key is the timeframe name and the corresponding is the
+  #         translated label.
+  def subtitles
+    {
+      "week" => I18n.t("helpers.application_helper.subtitle.week"),
+      "month" => I18n.t("helpers.application_helper.subtitle.month"),
+      "year" => I18n.t("helpers.application_helper.subtitle.year"),
+      "infinity" => I18n.t("helpers.application_helper.subtitle.infinity"),
+      "latest" => I18n.t("helpers.application_helper.subtitle.latest")
+    }
+  end
 
+  # Provides a status string for HTML data attributes.
+  #
+  # @return [String] "logged-in" or "logged-out" depending on the requesting user's current signin
+  #         status.
   def user_logged_in_status
     user_signed_in? ? "logged-in" : "logged-out"
   end
 
+  # Provides a string for HTML data attributes; comprised of the response's Rails controller name
+  # and action name.
+  #
+  # @return [String]
   def current_page
     "#{controller_name}-#{controller.action_name}"
   end
 
+  # Answers the simple question "Should we show this link?"
+  #
+  # @param link [NavigationLink]
+  #
+  # @return [TrueClass] true when we should render the given link.
+  # @return [FalseClass] false when we should **not** render the given link.
+  def display_navigation_link?(link:)
+    # This is a quick short-circuit; we already have the link. So don't bother asking the "Is this
+    # feature enabled" question if the given link requires a logged in/out state
+    # that doesn't match the user's current state.
+    return false if link.display_to_logged_in? && !user_signed_in?
+    return false if link.display_to_logged_out? && user_signed_in?
+    return true if navigation_link_is_for_an_enabled_feature?(link: link)
+
+    false
+  end
+
+  # @param link [NavigationLink]
+  #
+  # @note [@jeremyf] - making an assumption, namely that the only navigation oriented feature is the
+  #                    Listing.  If this changes, adjust this method accordingly.  Normally I like to have method return
+  def navigation_link_is_for_an_enabled_feature?(link:)
+    return true if Listing.feature_enabled?
+
+    # The "/listings" is an assumption on the routing.  So let's first try :listings_path.
+    listings_url = URL.url(try(:listings_path) || "/listings")
+    return false if listings_url == URL.url(link.url)
+
+    true
+  end
+
+  # @return [String] a string conformant to HTML class attribute
+  # @see ApplicationHelper#current_page defines the fallback
+  #
+  # @note This tests for the existence of two specific instance variables.
+  #
   # rubocop:disable Rails/HelperInstanceVariable
   def view_class
     if @podcast_episode_show # custom due to edge cases
@@ -50,11 +101,24 @@ module ApplicationHelper
     elsif @story_show
       "stories stories-show"
     else
-      "#{controller_name} #{controller_name}-#{controller.action_name}"
+      "#{controller_name} #{current_page}"
     end
   end
   # rubocop:enable Rails/HelperInstanceVariable
 
+  # This function derives the appropriate "title" given the page_title.  Further it assigns the
+  # `:title` content region.
+  #
+  # @param page_title [String] the proposed title
+  # @return [String] the derived title based on method implementation.
+  #
+  # @note In addition to returning the derived title, this function will call
+  #       {ActionView::Helpers::CaptureHelper#content_for} to set the `:title` "content" region.
+  #
+  # @see https://api.rubyonrails.org/classes/ActionView/Helpers/CaptureHelper.html#method-i-content_for
+  #      API docs for `#content_for`
+  # @see https://guides.rubyonrails.org/layouts_and_rendering.html#using-the-content-for-method
+  #      Guide docs for `#content_for`
   def title(page_title)
     derived_title = if page_title.include?(community_name)
                       page_title
@@ -67,15 +131,33 @@ module ApplicationHelper
     derived_title
   end
 
+  # Derives a timeframe specific title based on the given parameters.
+  #
+  # @param page_title [String] the proposed title
+  # @param timeframe [String] a timeframe
+  # @param content_for [Boolean] when true, pass the derived title to the `#title` method.
+  #
+  # @see ApplicationHelper#subtitles `#subtitles` method for details around the timeframe.
+  # @see ApplicationHelper#title `#title` method for details on how we convert this title.
   def title_with_timeframe(page_title:, timeframe:, content_for: false)
-    if timeframe.blank? || SUBTITLES[timeframe].blank?
+    if timeframe.blank? || subtitles[timeframe].blank?
       return content_for ? title(page_title) : page_title
     end
 
-    title_text = "#{page_title} - #{SUBTITLES.fetch(timeframe)}"
+    title_text = I18n.t("helpers.application_helper.title_text", title: page_title,
+                                                                 timeframe: subtitles.fetch(timeframe))
     content_for ? title(title_text) : title_text
   end
 
+  # @param url [String, #presence]
+  # @param width [Integer]
+  # @param quality [Integer]
+  # @param fetch_format [String]
+  # @param random_fallback [Boolean]
+  #
+  # @return [String] if we have a URL or a fallback image
+  # @return [NilClass] if there is no given URL nor a fallback image
+  # @note This method uses different logic than {ApplicationHelper#optimized_image_tag}
   def optimized_image_url(url, width: 500, quality: 80, fetch_format: "auto", random_fallback: true)
     fallback_image = asset_path("#{rand(1..40)}.png") if random_fallback
 
@@ -85,6 +167,7 @@ module ApplicationHelper
     Images::Optimizer.call(normalized_url, width: width, quality: quality, fetch_format: fetch_format)
   end
 
+  # @todo Should this use {ApplicationHelper#optimized_image_url} logic?
   def optimized_image_tag(image_url, optimizer_options: {}, image_options: {})
     image_options[:width] ||= optimizer_options[:width]
     image_options[:height] ||= optimizer_options[:height]
@@ -132,31 +215,28 @@ module ApplicationHelper
   end
 
   def follow_button(followable, style = "full", classes = "")
-    return if followable == DELETED_USER
+    return if followable == Users::DeletedUser
 
     user_follow = followable.instance_of?(User) ? "follow-user" : ""
-    followable_type = if followable.respond_to?(:decorated?) && followable.decorated?
-                        followable.object.class.name
-                      else
-                        followable.class.name
-                      end
-
+    followable_type = followable.class_name
     followable_name = followable.name
 
     tag.button(
-      I18n.t("core.follow"),
+      I18n.t("helpers.application_helper.follow.text.#{followable_type}",
+             default: I18n.t("helpers.application_helper.follow.text.default")),
       name: :button,
       type: :button,
       data: {
-        info: {
-          id: followable.id,
-          className: followable_type,
-          name: followable_name,
-          style: style
-        }
+        info: DataInfo.to_json(object: followable, className: followable_type, style: style)
       },
       class: "crayons-btn follow-action-button whitespace-nowrap #{classes} #{user_follow}",
-      aria: { label: "Follow #{followable_type}: #{followable_name}", pressed: "false" },
+      aria: {
+        label: I18n.t("helpers.application_helper.follow.aria_label.#{followable_type}",
+                      name: followable_name,
+                      default: I18n.t("helpers.application_helper.follow.aria_label.default", type: followable_type,
+                                                                                              name: followable_name)),
+        pressed: "false"
+      },
     )
   end
 
@@ -166,8 +246,6 @@ module ApplicationHelper
   end
 
   def user_colors(user)
-    return { bg: "#19063A", text: "#dce9f3" } if user == DELETED_USER
-
     user.decorate.enriched_colors
   end
 
@@ -179,14 +257,6 @@ module ApplicationHelper
     return "" if params[:tag].blank?
 
     "/t/#{params[:tag]}"
-  end
-
-  def logo_svg
-    if Settings::General.logo_svg.present?
-      Settings::General.logo_svg.html_safe # rubocop:disable Rails/OutputSafety
-    else
-      inline_svg_tag("devplain.svg", class: "logo", size: "20% * 20%", aria: true, title: "App logo")
-    end
   end
 
   def community_name
@@ -214,14 +284,19 @@ module ApplicationHelper
   end
 
   def collection_link(collection, **kwargs)
-    size_string = "#{collection.articles.published.size} Part Series"
-    body = collection.slug.present? ? "#{collection.slug} (#{size_string})" : size_string
+    size_string = I18n.t("views.articles.series.size", count: collection.articles.published.size)
+    body = if collection.slug.present?
+             I18n.t("views.articles.series.subtitle", slug: collection.slug,
+                                                      size: size_string)
+           else
+             size_string
+           end
 
     link_to body, collection.path, **kwargs
   end
 
-  def email_link(text: nil, additional_info: nil)
-    email = ForemInstance.email
+  def contact_link(text: nil, additional_info: nil)
+    email = ForemInstance.contact_email
     mail_to email, text || email, additional_info
   end
 
@@ -292,17 +367,12 @@ module ApplicationHelper
   def admin_config_label(method, content = nil, model: Settings::General)
     content ||= tag.span(method.to_s.humanize)
 
-    if method.to_sym.in?(Settings::Mandatory.keys)
-      required = tag.span("Required", class: "crayons-indicator crayons-indicator--critical")
-      content = safe_join([content, required])
-    end
-
     label_prefix = model.name.split("::").map(&:underscore).join("_")
     tag.label(content, class: "site-config__label crayons-field__label", for: "#{label_prefix}_#{method}")
   end
 
-  def admin_config_description(content)
-    tag.p(content, class: "crayons-field__description") unless content.empty?
+  def admin_config_description(content, **opts)
+    tag.p(content, class: "crayons-field__description", **opts) unless content.empty?
   end
 
   def role_display_name(role)
@@ -328,10 +398,30 @@ module ApplicationHelper
   end
 
   def creator_settings_form?
-    return unless FeatureFlag.enabled?(:creator_onboarding)
     return unless User.with_role(:creator).any?
 
     creator = User.with_role(:creator).first
     !creator.checked_code_of_conduct && !creator.checked_terms_and_conditions
+  end
+
+  # This function is responsible for adding a policy class (and possibly the hidden class).  It's
+  # applying some shortcuts to reduce the likelihood of any Cumulative Layout Shift.
+  #
+  # @param name [String,Symbol] the HTML element name (e.g. "li", "div", "a")
+  # @param record [Object] the record for which we're testing a policy
+  # @param query [Symbol, String] the query we're running on the policy
+  # @param kwargs [Hash] The arguments pass, with modifications to the given :class (see
+  #        implementation details).
+  #
+  # @yield the body of the HTML element
+  #
+  # @see ApplicationPolicy.dom_class_for
+  # @see https://api.rubyonrails.org/classes/ActionView/Helpers/TagHelper.html#method-i-content_tag
+  # @see ./app/javascript/packs/applyApplicationPolicyToggles.js
+  def application_policy_content_tag(name, record:, query:, **kwargs, &block)
+    dom_class = kwargs.delete(:class) || kwargs.delete("class") || ""
+    dom_class += " #{ApplicationPolicy.dom_classes_for(record: record, query: query)}"
+
+    content_tag(name, class: dom_class, **kwargs, &block)
   end
 end

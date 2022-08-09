@@ -75,6 +75,10 @@ module Authorizer
       has_role?(:creator)
     end
 
+    def accesses_mod_response_templates?
+      has_trusted_role? || any_admin? || moderator? || tag_moderator?
+    end
+
     # When you need to know if we trust the user, but don't want to
     # have stale information that the `trusted?` method might give
     # you.
@@ -90,6 +94,10 @@ module Authorizer
     # @todo Review whether we can use trusted? or if we even need to cache things.
     def has_trusted_role?
       has_role?(:trusted)
+    end
+
+    def moderator?
+      has_role?(:moderator)
     end
 
     def podcast_admin_for?(podcast)
@@ -133,11 +141,6 @@ module Authorizer
       has_any_role?(:tech_admin, :super_admin)
     end
 
-    def trusted
-      ActiveSupport::Deprecation.warn("User#trusted is deprecated, favor User#trusted?")
-      trusted?
-    end
-
     def trusted?
       return @trusted if defined? @trusted
 
@@ -158,11 +161,6 @@ module Authorizer
       has_role?(:warned)
     end
 
-    def warned
-      ActiveSupport::Deprecation.warn("User#warned is deprecated, favor User#warned?")
-      warned?
-    end
-
     def workshop_eligible?
       has_any_role?(:workshop_pass)
     end
@@ -177,6 +175,4 @@ module Authorizer
       user.__send__(:has_any_role?, *args)
     end
   end
-
-  private_constant :RoleBasedQueries
 end

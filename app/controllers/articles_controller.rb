@@ -1,21 +1,45 @@
 class ArticlesController < ApplicationController
   include ApplicationHelper
 
+  # NOTE: It seems quite odd to not authenticate the user for the :new action.
   before_action :authenticate_user!, except: %i[feed new]
-  before_action :set_article, only: %i[edit manage update destroy stats admin_unpublish]
-  before_action :raise_suspended, only: %i[new create update]
+  before_action :set_article, only: %i[edit manage update destroy stats admin_unpublish admin_featured_toggle]
+  # NOTE: Consider pushing this check into the associated Policy.  We could choose to raise a
+  #       different error which we could then rescue as part of our exception handling.
+  before_action :check_suspended, only: %i[new create update]
   before_action :set_cache_control_headers, only: %i[feed]
   after_action :verify_authorized
 
+  ##
+  # [@jeremyf] - My dreamiest of dreams is to move this to the ApplicationController.  But it's very
+  #              presence could create some havoc with our edge caching.  So I'm scoping it to the
+  #              place where the code is likely to raise an ApplicationPolicy::UserRequiredError.
+  #
+  #              I still want to enable this, but first want to get things mostly conformant with
+  #              existing expectations.  Note, in config/application.rb, we're rescuing the below
+  #              excpetion as though it was a Pundit::NotAuthorizedError.
+  #
+  #              The difference being that rescue_from is an ALWAYS use case.  Whereas the
+  #              config/application.rb uses the config.consider_all_requests_local to determine if
+  #              we bubble the exception up or handle it.
+  #
+  # rescue_from ApplicationPolicy::UserRequiredError, with: :respond_with_request_for_authentication
+
   def feed
+    # [@jeremyf] - I am a firm believer that we should check authorization.  However, in this case,
+    #              based on our implementation constraints and assumptions, the `#feed` action will
+    #              almost certainly be available to everyone (what's in the feed will vary
+    #              signficantly).  So while I would love an `authorize(Article)` here, I will make
+    #              do with a comment.
     skip_authorization
 
     @articles = Article.feed.order(published_at: :desc).page(params[:page].to_i).per(12)
+    @latest = request.path == latest_feed_path
     @articles = if params[:username]
                   handle_user_or_organization_feed
                 elsif params[:tag]
                   handle_tag_feed
-                elsif request.path == latest_feed_path
+                elsif @latest
                   @articles
                     .where("score > ?", Articles::Feeds::Latest::MINIMUM_SCORE)
                     .includes(:user)
@@ -30,15 +54,21 @@ class ArticlesController < ApplicationController
     set_surrogate_key_header "feed"
     set_cache_control_headers(10.minutes.to_i, stale_while_revalidate: 30, stale_if_error: 1.day.to_i)
 
-    render layout: false, locals: {
+    render layout: false, content_type: "application/xml", locals: {
       articles: @articles,
       user: @user,
       tag: @tag,
+      latest: @latest,
       allowed_tags: MarkdownProcessor::AllowedTags::FEED,
-      allowed_attributes: MarkdownProcessor::AllowedAttributes::FEED
+      allowed_attributes: MarkdownProcessor::AllowedAttributes::FEED,
+      scrubber: FeedMarkdownScrubber.new
     }
   end
 
+  # @note The /new path is a unique creature.  We want to ensure that folks coming to the /new with
+  #       a prefill of information are first prompted to sign-in, and then given a form that
+  #       prepopulates with that pre-fill information.  This is a feature that StackOverflow and
+  #       CodePen use to have folks post on Dev.
   def new
     base_editor_assignments
 
@@ -48,7 +78,11 @@ class ArticlesController < ApplicationController
       authorize(Article)
     else
       skip_authorization
-      store_location_for(:user, request.path)
+
+      # We want the query params for the request (as that is where we have the prefill).  The
+      # `request.path` excludes the query parameters, so we're going with the `request.url` which
+      # includes the parameters.
+      store_location_for(:user, request.url)
     end
   end
 
@@ -91,11 +125,19 @@ class ArticlesController < ApplicationController
         format.json { render json: @article.errors, status: :unprocessable_entity }
       else
         format.json do
+          front_matter = parsed.front_matter.to_h
+          if front_matter["tags"]
+            tags = Article.new.tag_list.add(front_matter["tags"], parser: ActsAsTaggableOn::TagParser)
+          end
+          if front_matter["cover_image"]
+            cover_image = ApplicationController.helpers.cloud_cover_url(front_matter["cover_image"])
+          end
+
           render json: {
             processed_html: processed_html,
-            title: parsed["title"],
-            tags: (Article.new.tag_list.add(parsed["tags"], parser: ActsAsTaggableOn::TagParser) if parsed["tags"]),
-            cover_image: (ApplicationController.helpers.cloud_cover_url(parsed["cover_image"]) if parsed["cover_image"])
+            title: front_matter["title"],
+            tags: tags,
+            cover_image: cover_image
           }, status: :ok
         end
       end
@@ -104,7 +146,6 @@ class ArticlesController < ApplicationController
 
   def create
     authorize Article
-
     @user = current_user
     article = Articles::Creator.call(@user, article_params_json)
 
@@ -118,7 +159,6 @@ class ArticlesController < ApplicationController
   def update
     authorize @article
     @user = @article.user || current_user
-
     updated = Articles::Updater.call(@user, @article, article_params_json)
 
     respond_to do |format|
@@ -129,7 +169,7 @@ class ArticlesController < ApplicationController
           return
         end
         if params[:destination]
-          redirect_to(URI.parse(params[:destination]).path)
+          redirect_to(Addressable::URI.parse(params[:destination]).path)
           return
         end
         if params[:article][:video_thumbnail_url]
@@ -150,7 +190,7 @@ class ArticlesController < ApplicationController
   end
 
   def delete_confirm
-    @article = current_user.articles.find_by(slug: params[:slug])
+    @article = Article.find_by(slug: params[:slug])
     not_found unless @article
     authorize @article
   end
@@ -159,7 +199,7 @@ class ArticlesController < ApplicationController
     authorize @article
     Articles::Destroyer.call(@article)
     respond_to do |format|
-      format.html { redirect_to "/dashboard", notice: "Article was successfully deleted." }
+      format.html { redirect_to "/dashboard", notice: I18n.t("articles_controller.deleted") }
       format.json { head :no_content }
     end
   end
@@ -171,11 +211,20 @@ class ArticlesController < ApplicationController
 
   def admin_unpublish
     authorize @article
-    if @article.has_frontmatter?
-      @article.body_markdown.sub!(/\npublished:\s*true\s*\n/, "\npublished: false\n")
+
+    result = Articles::Unpublish.call(current_user, @article)
+
+    if result.success
+      render json: { message: "success", path: @article.current_state_path }, status: :ok
     else
-      @article.published = false
+      render json: { message: @article.errors.full_messages }, status: :unprocessable_entity
     end
+  end
+
+  def admin_featured_toggle
+    authorize @article
+
+    @article.featured = params.dig(:article, :featured).to_i == 1
 
     if @article.save
       render json: { message: "success", path: @article.current_state_path }, status: :ok
@@ -224,10 +273,11 @@ class ArticlesController < ApplicationController
   end
 
   def handle_tag_feed
-    @tag = Tag.aliased_name(params[:tag])
-    return unless @tag
+    tag_name = Tag.aliased_name(params[:tag])
+    return unless tag_name
 
-    @articles = @articles.cached_tagged_with(@tag)
+    @tag = Tag.find_by(name: tag_name)
+    @articles = @articles.cached_tagged_with(tag_name)
   end
 
   def set_article
@@ -244,6 +294,8 @@ class ArticlesController < ApplicationController
   # TODO: refactor all of this update logic into the Articles::Updater possibly,
   # ideally there should only be one place to handle the update logic
   def article_params_json
+    return @article_params_json if @article_params_json
+
     params.require(:article) # to trigger the correct exception in case `:article` is missing
 
     params["article"].transform_keys!(&:underscore)
@@ -253,12 +305,13 @@ class ArticlesController < ApplicationController
                      else
                        %i[
                          title body_markdown main_image published description video_thumbnail_url
-                         tag_list canonical_url series collection_id archived
+                         tag_list canonical_url series collection_id archived published_at timezone
+                         published_at_date published_at_time
                        ]
                      end
 
     # NOTE: the organization logic is still a little counter intuitive but this should
-    # fix the bug <https://github.com/thepracticaldev/dev.to/issues/2871>
+    # fix the bug <https://github.com/forem/forem/issues/2871>
     if params["article"]["user_id"] && org_admin_user_change_privilege
       allowed_params << :user_id
     elsif params["article"]["organization_id"] && allowed_to_change_org_id?
@@ -266,7 +319,18 @@ class ArticlesController < ApplicationController
       allowed_params << :organization_id
     end
 
-    params.require(:article).permit(allowed_params)
+    time_zone_str = params["article"].delete("timezone")
+
+    time = params["article"].delete("published_at_time")
+    date = params["article"].delete("published_at_date")
+
+    if date.present?
+      time_zone = Time.find_zone(time_zone_str)
+      time_zone ||= Time.find_zone("UTC")
+      params["article"]["published_at"] = time_zone.parse("#{date} #{time}")
+    end
+
+    @article_params_json = params.require(:article).permit(allowed_params)
   end
 
   def allowed_to_change_org_id?

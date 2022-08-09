@@ -15,6 +15,7 @@ class StoriesController < ApplicationController
   }.freeze
 
   SIGNED_OUT_RECORD_COUNT = 60
+  REDIRECT_VIEW_PARAMS = %w[moderate admin].freeze
 
   before_action :authenticate_user!, except: %i[index show]
   before_action :set_cache_control_headers, only: %i[index show]
@@ -24,7 +25,6 @@ class StoriesController < ApplicationController
 
   def index
     @page = (params[:page] || 1).to_i
-    @article_index = true
 
     return handle_user_or_organization_or_podcast_or_page_index if params[:username]
 
@@ -80,7 +80,7 @@ class StoriesController < ApplicationController
     potential_username = params[:username].tr("@", "").downcase
     @user = User.find_by("old_username = ? OR old_old_username = ?", potential_username, potential_username)
     if @user&.articles&.find_by(slug: params[:slug])
-      redirect_permanently_to(URI.parse("/#{@user.username}/#{params[:slug]}").path)
+      redirect_permanently_to(Addressable::URI.parse("/#{@user.username}/#{params[:slug]}").path)
       return
     end
 
@@ -127,7 +127,7 @@ class StoriesController < ApplicationController
     assign_hero_html
     assign_podcasts
     get_latest_campaign_articles if Campaign.current.show_in_sidebar?
-    @article_index = true
+
     set_surrogate_key_header "main_app_home_page"
     set_cache_control_headers(600,
                               stale_while_revalidate: 30,
@@ -210,8 +210,7 @@ class StoriesController < ApplicationController
   end
 
   def redirect_if_view_param
-    redirect_to admin_user_path(@user.id) if params[:view] == "moderate"
-    redirect_to edit_admin_user_path(@user.id) if params[:view] == "admin"
+    redirect_to admin_user_path(@user.id) if REDIRECT_VIEW_PARAMS.include?(params[:view])
   end
 
   def redirect_if_show_view_param
@@ -275,7 +274,7 @@ class StoriesController < ApplicationController
   end
 
   def permission_denied?
-    !@article.published && params[:preview] != @article.password
+    (!@article.published || @article.scheduled?) && params[:preview] != @article.password
   end
 
   def assign_co_authors
@@ -337,11 +336,11 @@ class StoriesController < ApplicationController
       },
       url: URL.user(@user),
       sameAs: user_same_as,
-      image: Images::Profile.call(@user.profile_image_url, length: 320),
+      image: @user.profile_image_url_for(length: 320),
       name: @user.name,
       email: decorated_user.profile_email,
       description: decorated_user.profile_summary
-    }.reject { |_, v| v.blank? }
+    }.compact_blank
   end
 
   def set_article_json_ld
@@ -399,9 +398,9 @@ class StoriesController < ApplicationController
         "@id": URL.organization(@organization)
       },
       url: URL.organization(@organization),
-      image: Images::Profile.call(@organization.profile_image_url, length: 320),
+      image: @organization.profile_image_url_for(length: 320),
       name: @organization.name,
-      description: @organization.summary.presence || "404 bio not found"
+      description: @organization.summary.presence || I18n.t("stories_controller.404_bio_not_found")
     }
   end
 
@@ -412,6 +411,6 @@ class StoriesController < ApplicationController
       @user.twitter_username.present? ? "https://twitter.com/#{@user.twitter_username}" : nil,
       @user.github_username.present? ? "https://github.com/#{@user.github_username}" : nil,
       @user.profile.website_url,
-    ].reject(&:blank?)
+    ].compact_blank
   end
 end

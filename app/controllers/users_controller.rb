@@ -1,21 +1,15 @@
 class UsersController < ApplicationController
   before_action :set_no_cache_header
-  before_action :raise_suspended, only: %i[update update_password]
+  before_action :check_suspended, only: %i[update update_password]
   before_action :set_user,
                 only: %i[update update_password request_destroy full_delete remove_identity]
-  # rubocop:disable Layout/LineLength
-  after_action :verify_authorized, except: %i[index signout_confirm add_org_admin remove_org_admin remove_from_org confirm_destroy]
-  # rubocop:enable Layout/LineLength
-  before_action :authenticate_user!, only: %i[onboarding_update onboarding_checkbox_update]
+  after_action :verify_authorized,
+               except: %i[index signout_confirm add_org_admin remove_org_admin remove_from_org confirm_destroy]
   before_action :set_suggested_users, only: %i[index]
   before_action :initialize_stripe, only: %i[edit]
 
-  ALLOWED_USER_PARAMS = %i[last_onboarding_page username].freeze
-  ALLOWED_ONBOARDING_PARAMS = %i[checked_code_of_conduct checked_terms_and_conditions].freeze
   INDEX_ATTRIBUTES_FOR_SERIALIZATION = %i[id name username summary profile_image].freeze
   private_constant :INDEX_ATTRIBUTES_FOR_SERIALIZATION
-  REMOVE_IDENTITY_ERROR = "An error occurred. Please try again or send an email to: %<email>s".freeze
-  private_constant :REMOVE_IDENTITY_ERROR
 
   def index
     @users =
@@ -51,9 +45,9 @@ class UsersController < ApplicationController
       # explicitly requested "Feed fetch now" or simply updated any other field
       import_articles_from_feed(@user)
 
-      notice = "Your profile was successfully updated."
+      notice = I18n.t("users_controller.updated_profile")
       if @user.export_requested?
-        notice += " The export will be emailed to you shortly."
+        notice += I18n.t("users_controller.send_export")
         ExportContentWorker.perform_async(@user.id, @user.email)
       end
       if @user.setting.experience_level.present?
@@ -63,7 +57,7 @@ class UsersController < ApplicationController
       @user.touch(:profile_updated_at)
       redirect_to "/settings/#{@tab}"
     else
-      Honeycomb.add_field("error", @user.errors.messages.reject { |_, v| v.empty? })
+      Honeycomb.add_field("error", @user.errors.messages.compact_blank)
       Honeycomb.add_field("errored", true)
 
       if @tab
@@ -79,16 +73,16 @@ class UsersController < ApplicationController
     set_current_tab("account")
 
     if destroy_request_in_progress?
-      notice = "You have already requested account deletion. Please, check your email for further instructions."
+      notice = I18n.t("users_controller.deletion_in_progress")
       flash[:settings_notice] = notice
       redirect_to user_settings_path(@tab)
     elsif @user.email?
       Users::RequestDestroy.call(@user)
-      notice = "You have requested account deletion. Please, check your email for further instructions."
+      notice = I18n.t("users_controller.deletion_requested")
       flash[:settings_notice] = notice
       redirect_to user_settings_path(@tab)
     else
-      flash[:settings_notice] = "Please, provide an email to delete your account."
+      flash[:settings_notice] = I18n.t("users_controller.provide_email")
       redirect_to user_settings_path("account")
     end
   end
@@ -99,15 +93,14 @@ class UsersController < ApplicationController
     if @user
       authorize @user
     else
-      flash[:alert] = "You must be logged in to proceed with account deletion."
+      flash[:alert] = I18n.t("users_controller.log_in_to_delete")
       redirect_to sign_up_path and return
     end
 
     destroy_token = Rails.cache.read("user-destroy-token-#{@user.id}")
 
-    # rubocop:disable Layout/LineLength
     if destroy_token.blank?
-      flash[:settings_notice] = "Your token has expired, please request a new one. Tokens only last for 12 hours after account deletion is initiated."
+      flash[:settings_notice] = I18n.t("users_controller.token_expired")
       redirect_to user_settings_path("account")
     elsif destroy_token != params[:token]
       Honeycomb.add_field("destroy_token", destroy_token)
@@ -115,7 +108,6 @@ class UsersController < ApplicationController
 
       raise ActionController::RoutingError, "Not Found"
     end
-    # rubocop:enable Layout/LineLength
   end
 
   def full_delete
@@ -123,10 +115,10 @@ class UsersController < ApplicationController
     if @user.email?
       Users::DeleteWorker.perform_async(@user.id)
       sign_out @user
-      flash[:global_notice] = "Your account deletion is scheduled. You'll be notified when it's deleted."
+      flash[:global_notice] = I18n.t("users_controller.deletion_scheduled")
       redirect_to new_user_registration_path
     else
-      flash[:settings_notice] = "Please, provide an email to delete your account"
+      flash[:settings_notice] = I18n.t("users_controller.provide_email_delete")
       redirect_to user_settings_path("account")
     end
   end
@@ -134,7 +126,7 @@ class UsersController < ApplicationController
   def remove_identity
     set_current_tab("account")
 
-    error_message = format(REMOVE_IDENTITY_ERROR, email: ForemInstance.email)
+    error_message = I18n.t("errors.messages.try_again_email", email: ForemInstance.contact_email)
     unless Authentication::Providers.enabled?(params[:provider])
       flash[:error] = error_message
       redirect_to user_settings_path(@tab)
@@ -158,7 +150,8 @@ class UsersController < ApplicationController
       # We should delete them when a user unlinks their GitHub account.
       @user.github_repos.destroy_all if provider.provider_name == :github
 
-      flash[:settings_notice] = "Your #{provider.official_name} account was successfully removed."
+      flash[:settings_notice] =
+        I18n.t("users_controller.removed_identity", provider: provider.official_name)
     else
       flash[:error] = error_message
     end
@@ -166,42 +159,15 @@ class UsersController < ApplicationController
     redirect_to user_settings_path(@tab)
   end
 
-  def onboarding_update
-    authorize User
-
-    user_params = { saw_onboarding: true }
-
-    if params[:user]
-      if params.dig(:user, :username).blank?
-        return render_update_response(false, "Username cannot be blank")
-      end
-
-      sanitize_user_params
-      user_params.merge!(params[:user].permit(ALLOWED_USER_PARAMS))
-    end
-
-    update_result = Users::Update.call(current_user, user: user_params, profile: profile_params)
-    render_update_response(update_result.success?, update_result.errors_as_sentence)
-  end
-
-  def onboarding_checkbox_update
-    if params[:user]
-      current_user.assign_attributes(params[:user].permit(ALLOWED_ONBOARDING_PARAMS))
-    end
-
-    current_user.saw_onboarding = true
-    authorize User
-    render_update_response(current_user.save)
-  end
-
   def join_org
     authorize User
     if (@organization = Organization.find_by(secret: params[:org_secret].strip))
       OrganizationMembership.create(user_id: current_user.id, organization_id: @organization.id, type_of_user: "member")
-      flash[:settings_notice] = "You have joined the #{@organization.name} organization."
+      flash[:settings_notice] =
+        I18n.t("users_controller.joined_org", organization_name: @organization.name)
       redirect_to "/settings/organization/#{@organization.id}"
     else
-      flash[:error] = "The given organization secret was invalid."
+      flash[:error] = I18n.t("users_controller.invalid_secret")
       redirect_to "/settings/organization/new"
     end
   end
@@ -210,7 +176,7 @@ class UsersController < ApplicationController
     org = Organization.find_by(id: params[:organization_id])
     authorize org
     OrganizationMembership.find_by(organization_id: org.id, user_id: current_user.id)&.delete
-    flash[:settings_notice] = "You have left your organization."
+    flash[:settings_notice] = I18n.t("users_controller.left_org")
     redirect_to "/settings/organization/new"
   end
 
@@ -222,7 +188,7 @@ class UsersController < ApplicationController
                                                                                          organization: org)
 
     OrganizationMembership.find_by(user_id: adminable.id, organization_id: org.id).update(type_of_user: "admin")
-    flash[:settings_notice] = "#{adminable.name} is now an admin."
+    flash[:settings_notice] = I18n.t("users_controller.added_admin", name: adminable.name)
     redirect_to "/settings/organization/#{org.id}"
   end
 
@@ -233,7 +199,7 @@ class UsersController < ApplicationController
     not_authorized unless current_user.org_admin?(org) && unadminable.org_admin?(org)
 
     OrganizationMembership.find_by(user_id: unadminable.id, organization_id: org.id).update(type_of_user: "member")
-    flash[:settings_notice] = "#{unadminable.name} is no longer an admin."
+    flash[:settings_notice] = I18n.t("users_controller.removed_admin", name: unadminable.name)
     redirect_to "/settings/organization/#{org.id}"
   end
 
@@ -245,15 +211,13 @@ class UsersController < ApplicationController
     not_authorized unless current_user.org_admin?(org) && removable_org_membership
 
     removable_org_membership.delete
-    flash[:settings_notice] = "#{removable.name} is no longer part of your organization."
+    flash[:settings_notice] = I18n.t("users_controller.removed_member", name: removable.name)
     redirect_to "/settings/organization/#{org.id}"
   end
 
   def signout_confirm; end
 
   def handle_settings_tab
-    return @tab = "profile" if @tab.blank?
-
     case @tab
     when "profile"
       handle_integrations_tab
@@ -277,7 +241,7 @@ class UsersController < ApplicationController
     if @user.update_with_password(password_params)
       redirect_to user_settings_path(@tab)
     else
-      Honeycomb.add_field("error", @user.errors.messages.reject { |_, v| v.empty? })
+      Honeycomb.add_field("error", @user.errors.messages.compact_blank)
       Honeycomb.add_field("errored", true)
 
       if @tab
@@ -290,10 +254,6 @@ class UsersController < ApplicationController
   end
 
   private
-
-  def sanitize_user_params
-    params[:user].delete_if { |_k, v| v.blank? }
-  end
 
   def set_suggested_users
     @suggested_users = Settings::General.suggested_users
@@ -312,14 +272,6 @@ class UsersController < ApplicationController
     )
 
     recent_suggestions.presence || default_suggested_users
-  end
-
-  def render_update_response(success, errors = nil)
-    status = success ? 200 : 422
-
-    respond_to do |format|
-      format.json { render json: { errors: errors }, status: status }
-    end
   end
 
   def handle_organization_tab
@@ -348,8 +300,10 @@ class UsersController < ApplicationController
   end
 
   def handle_response_templates_tab
-    @response_templates = current_user.response_templates
-    @response_template = ResponseTemplate.find_or_initialize_by(id: params[:id], user: current_user)
+    @personal_response_templates = current_user.response_templates
+    @trusted_response_templates = policy_scope(ResponseTemplate).where(type_of: "mod_comment")
+    @response_template = policy_scope(ResponseTemplate).find_by(id: params[:id]) ||
+      ResponseTemplate.new
   end
 
   def set_user
@@ -377,10 +331,6 @@ class UsersController < ApplicationController
     return if user.setting.feed_url.blank?
 
     Feeds::ImportArticlesWorker.perform_async(user.id)
-  end
-
-  def profile_params
-    params[:profile] ? params[:profile].permit(Profile.static_fields + Profile.attributes) : nil
   end
 
   def password_params

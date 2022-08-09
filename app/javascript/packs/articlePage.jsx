@@ -1,10 +1,20 @@
 import { h, render } from 'preact';
+import ahoy from 'ahoy.js';
 import { Snackbar, addSnackbarItem } from '../Snackbar';
 import { addFullScreenModeControl } from '../utilities/codeFullscreenModeSwitcher';
 import { initializeDropdown } from '../utilities/dropdownUtils';
 import { embedGists } from '../utilities/gist';
+import { initializeUserSubscriptionLiquidTagContent } from '../liquidTags/userSubscriptionLiquidTag';
+import { isNativeAndroid, copyToClipboard } from '@utilities/runtime';
 
-/* global Runtime */
+const animatedImages = document.querySelectorAll('[data-animated="true"]');
+if (animatedImages.length > 0) {
+  import('@utilities/animatedImageUtils').then(
+    ({ initializePausableAnimatedImages }) => {
+      initializePausableAnimatedImages(animatedImages);
+    },
+  );
+}
 
 const fullscreenActionElements = document.getElementsByClassName(
   'js-fullscreen-code-action',
@@ -32,7 +42,7 @@ function hideCopyLinkAnnouncerIfVisible() {
 const shareDropdownButton = document.getElementById('article-show-more-button');
 
 if (shareDropdownButton.dataset.initialized !== 'true') {
-  if (Runtime.isNativeAndroid('shareText')) {
+  if (isNativeAndroid('shareText')) {
     // Android native apps have enhanced sharing capabilities for Articles and don't use our standard dropdown
     shareDropdownButton.addEventListener('click', () =>
       AndroidBridge.shareText(location.href),
@@ -62,11 +72,54 @@ function showAnnouncer() {
   document.getElementById('article-copy-link-announcer').hidden = false;
 }
 
+// Temporary Ahoy Stats for comment section clicks on controls
+function trackCommentsSectionClicks() {
+  document
+    .getElementById('comments')
+    .addEventListener('click', ({ target }) => {
+      // We check for any parent container with a data-tracking-name attribute, as otherwise
+      // SVGs inside buttons can cause events to be missed
+      const relevantNode = target.closest('[data-tracking-name]');
+
+      if (!relevantNode) {
+        // We don't want to track this click
+        return;
+      }
+
+      ahoy.track('Comment section click', {
+        page: location.href,
+        element: relevantNode.dataset.trackingName,
+      });
+    });
+}
+
+// Temporary Ahoy Stats for displaying comments section either on page load or after scrolling
+function trackCommentsSectionDisplayed() {
+  const callback = (entries, observer) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        ahoy.track('Comment section viewable', { page: location.href });
+        observer.disconnect();
+      }
+      if (location.hash === '#comments') {
+        //handle focus event on text area
+        const element = document.getElementById('text-area');
+        const event = new FocusEvent('focus');
+        element.dispatchEvent(event);
+      }
+    });
+  };
+
+  const target = document.getElementById('comments');
+  const observer = new IntersectionObserver(callback, {});
+  observer.observe(target);
+}
+
 function copyArticleLink() {
   const postUrlValue = document
     .getElementById('copy-post-url-button')
     .getAttribute('data-postUrl');
-  Runtime.copyToClipboard(postUrlValue).then(() => {
+  copyToClipboard(postUrlValue).then(() => {
     showAnnouncer();
   });
 }
@@ -80,6 +133,9 @@ getCsrfToken().then(async () => {
   const root = document.getElementById('comment-subscription');
   const isLoggedIn = userStatus === 'logged-in';
 
+  if (!root) {
+    return;
+  }
   try {
     const {
       getCommentSubscriptionStatus,
@@ -114,10 +170,14 @@ getCsrfToken().then(async () => {
       root,
     );
   } catch (e) {
-    document.getElementById('comment-subscription').innerHTML =
+    root.innerHTML =
       '<p className="color-accent-danger">Unable to load Comment Subscription component.<br />Try refreshing the page.</p>';
   }
 });
 
 const targetNode = document.querySelector('#comments');
 targetNode && embedGists(targetNode);
+
+initializeUserSubscriptionLiquidTagContent();
+trackCommentsSectionClicks();
+trackCommentsSectionDisplayed();

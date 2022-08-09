@@ -4,7 +4,6 @@ import PropTypes from 'prop-types';
 import { userData, updateOnboarding } from '../utilities';
 
 import { Navigation } from './Navigation';
-import { ColorPicker } from './ProfileForm/ColorPicker';
 import { TextArea } from './ProfileForm/TextArea';
 import { TextInput } from './ProfileForm/TextInput';
 import { CheckBox } from './ProfileForm/CheckBox';
@@ -51,7 +50,7 @@ export class ProfileForm extends Component {
     const { formValues, last_onboarding_page } = this.state;
     const { username, ...newFormValues } = formValues;
     try {
-      const response = await request('/onboarding_update', {
+      const response = await request('/onboarding', {
         method: 'PATCH',
         body: {
           user: { last_onboarding_page, username },
@@ -67,7 +66,7 @@ export class ProfileForm extends Component {
       Honeybadger.notify(error.statusText);
       let errorMessage = 'Unable to continue, please try again.';
       if (error.status === 422) {
-        // parse validation error messages from UsersController#onboarding_update
+        // parse validation error messages from UsersController#onboarding
         const errorData = await error.json();
         errorMessage = errorData.errors;
         this.setState({ error: true, errorMessage });
@@ -124,14 +123,6 @@ export class ProfileForm extends Component {
             onFieldChange={this.handleFieldChange}
           />
         );
-      case 'color_field':
-        return (
-          <ColorPicker
-            key={field.id}
-            field={field}
-            onColorChange={this.handleColorPickerChange}
-          />
-        );
       case 'text_area':
         return (
           <TextArea
@@ -176,7 +167,7 @@ export class ProfileForm extends Component {
     return (
       <div
         data-testid="onboarding-profile-form"
-        className="onboarding-main crayons-modal"
+        className="onboarding-main crayons-modal crayons-modal--large"
       >
         <div
           className="crayons-modal__box"
