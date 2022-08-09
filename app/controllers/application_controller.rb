@@ -131,6 +131,7 @@ class ApplicationController < ActionController::Base
     true
   end
 
+  def respond_with_request_for_authentication
   # @deprecated Use {#authenticate_user} and #{ApplicationPolicy}.
   #
   # When we don't have a current user, render a response that prompts the requester to authenticate.
@@ -276,13 +277,7 @@ class ApplicationController < ActionController::Base
 
   def configure_permitted_parameters
     devise_parameter_sanitizer.permit(:sign_up, keys: %i[username name profile_image profile_image_url])
-<<<<<<< HEAD
-    devise_parameter_sanitizer.permit(:sign_in) do |user_params|
-      user_params.permit(:email, :password, :remember_me, :address)
-    end
-=======
     devise_parameter_sanitizer.permit(:accept_invitation, keys: %i[name])
->>>>>>> c2abdbeade7f4e039ac8cb56cbdf14adc06a8836
   end
 
   def internal_nav_param

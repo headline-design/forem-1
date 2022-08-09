@@ -1,33 +1,4 @@
 module ApplicationHelper
-<<<<<<< HEAD
-  # rubocop:disable Style/OpenStructUse, Performance/OpenStruct
-  USER_COLORS = ["#19063A", "#dce9f3"].freeze
-
-  def resource_name
-    :user
-  end
-
-  def resource
-    @resource ||= User.new
-  end
-
-  def devise_mapping
-    @devise_mapping ||= Devise.mappings[:user]
-  end
-
-  DELETED_USER = OpenStruct.new(
-    id: nil,
-    darker_color: Color::CompareHex.new(USER_COLORS).brightness,
-    username: "[deleted user]",
-    name: "[Deleted User]",
-    summary: nil,
-    twitter_username: nil,
-    github_username: nil,
-  )
-  # rubocop:enable Style/OpenStructUse, Performance/OpenStruct
-
-=======
->>>>>>> c2abdbeade7f4e039ac8cb56cbdf14adc06a8836
   LARGE_USERBASE_THRESHOLD = 1000
 
   # @return [Hash<String, String>] the key is the timeframe name and the corresponding is the
